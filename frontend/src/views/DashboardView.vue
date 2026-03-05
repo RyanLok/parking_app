@@ -14,9 +14,9 @@ const canStart = computed(() => cfg.canStart && bot.connected === true)
 const statusClass = computed(() => {
   const s = bot.status.status || ''
   if (s.includes('寻找') || s.includes('运行')) return 'badge-ok'
-  if (s === '已抢到车位') return 'badge-info'
+  if (s.includes('抢到') || s.includes('锁定')) return 'badge-info'
   if (s.includes('休眠')) return 'badge-warn'
-  if (s === '异常停止') return 'badge-err'
+  if (s.includes('过期') || s.includes('失败') || s.includes('异常')) return 'badge-err'
   return 'badge-muted'
 })
 
