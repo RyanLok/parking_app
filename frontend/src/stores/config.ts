@@ -39,7 +39,7 @@ export const useConfigStore = defineStore('config', () => {
     const c = cfg()
     if (!c) return false
     const ok = (v: unknown) => v !== '' && v != null && String(v).trim() !== ''
-    const okId = (v: unknown) => typeof v === 'number' && v > 0
+    const okId = (v: unknown) => v != null && Number(v) > 0
     const hasAuth = ok(c.mobile) && (ok(c.password_md5) || ok(c.token))
     return (
       hasAuth &&
@@ -53,7 +53,7 @@ export const useConfigStore = defineStore('config', () => {
     const list: string[] = []
     if (!c) return ['定位', '城市', '停车场', '车牌']
     const ok = (v: unknown) => v !== '' && v != null && String(v).trim() !== ''
-    const okId = (v: unknown) => typeof v === 'number' && v > 0
+    const okId = (v: unknown) => v != null && Number(v) > 0
     if (!ok(c.lng) || !ok(c.lat)) list.push('定位')
     if (!okId(c.city_id)) list.push('城市')
     if (!okId(c.park_id)) list.push('停车场')

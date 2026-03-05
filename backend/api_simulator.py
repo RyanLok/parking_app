@@ -75,7 +75,7 @@ def send_sms_code(mobile, user_lng, user_lat):
     })
     params["sign"] = generate_sign(params)
 
-    response = requests.post(url, headers=headers, data=params)
+    response = requests.post(url, headers=headers, data=params, timeout=10)
     return response.json()
 
 
@@ -104,7 +104,7 @@ def login_with_sms(mobile_b64, sms_code, user_lng, user_lat):
     })
     params["sign"] = generate_sign(params)
 
-    response = requests.post(url, headers=headers, data=params)
+    response = requests.post(url, headers=headers, data=params, timeout=10)
     return response.json()
 
 
@@ -136,7 +136,7 @@ def do_login(mobile, password, user_lng, user_lat):
     params["sign"] = generate_sign(params)
     
     print(f"[*] 执行登录请求, mobile: {mobile}")
-    response = requests.post(url, headers=headers, data=params)
+    response = requests.post(url, headers=headers, data=params, timeout=10)
     print(f"Status Code: {response.status_code}")
     print(f"Response: {response.text}\n")
     return response.json()
@@ -181,17 +181,20 @@ def get_space_list(token, park_id, city_id, user_lng, user_lat, leave_time_str=N
     params["sign"] = generate_sign(params)
     
     print(f"[*] 获取车位列表, parkId: {park_id}")
-    response = requests.post(url, headers=headers, data=params)
+    response = requests.post(url, headers=headers, data=params, timeout=10)
     # print(f"Status Code: {response.status_code}")
     res_json = response.json()
     if res_json.get("code") == 200:
         spaces = res_json.get("result", {}).get("list", [])
         
-        # 定义目标离场时间戳 (今天指定时间)
+        # 定义目标离场时间戳 (今天或明天指定时间)
         target_leave_timestamp = 0
         if leave_time_str:
-            today = datetime.datetime.now().date()
+            now = datetime.datetime.now()
+            today = now.date()
             time_obj = datetime.datetime.strptime(leave_time_str, "%H:%M").time()
+            if time_obj < now.time():
+                today += datetime.timedelta(days=1)
             target_dt = datetime.datetime.combine(today, time_obj)
             target_leave_timestamp = int(target_dt.timestamp() * 1000)
             # print(f"[*] 正在过滤可停到 {leave_time_str} ({target_dt}) 之后的车位...")
@@ -251,7 +254,7 @@ def book_space(token, park_id, space_id, plate_id, user_lng, user_lat):
     params["sign"] = generate_sign(params)
     
     print(f"[*] 准备下单锁定车位, spaceId: {space_id}, plateId: {plate_id}")
-    response = requests.post(url, headers=headers, data=params)
+    response = requests.post(url, headers=headers, data=params, timeout=10)
     res_json = response.json()
     
     if res_json.get("code") == 200:
@@ -300,7 +303,7 @@ def get_order(token, trade_no, user_lng, user_lat):
 
     params["sign"] = generate_sign(params)
     
-    response = requests.post(url, headers=headers, data=params)
+    response = requests.post(url, headers=headers, data=params, timeout=10)
     res_json = response.json()
     
     if res_json.get("code") == 4014:
@@ -335,7 +338,7 @@ def cancel_order(token, trade_no, user_lng, user_lat):
 
     params["sign"] = generate_sign(params)
     
-    response = requests.post(url, headers=headers, data=params)
+    response = requests.post(url, headers=headers, data=params, timeout=10)
     res_json = response.json()
     
     if res_json.get("code") == 4014:
@@ -376,7 +379,7 @@ def get_park_list(token, city_id, user_lng, user_lat, page=1, size=50):
     params["sign"] = generate_sign(params)
     
     # print(f"[*] 获取停车场列表 (City: {city_id}, Page: {page})")
-    response = requests.post(url, headers=headers, data=params)
+    response = requests.post(url, headers=headers, data=params, timeout=10)
     res_json = response.json()
     
     if res_json.get("code") == 200:
@@ -415,7 +418,7 @@ def get_city_list(token, user_lng, user_lat):
 
     params["sign"] = generate_sign(params)
     
-    response = requests.post(url, headers=headers, data=params)
+    response = requests.post(url, headers=headers, data=params, timeout=10)
     res_json = response.json()
     
     cities = []
@@ -449,7 +452,7 @@ def get_plate_list(token, user_lng, user_lat):
 
     params["sign"] = generate_sign(params)
     
-    response = requests.post(url, headers=headers, data=params)
+    response = requests.post(url, headers=headers, data=params, timeout=10)
     res_json = response.json()
     
     plates = []

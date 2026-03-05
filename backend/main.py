@@ -109,13 +109,13 @@ def _cleanup_stale() -> None:
     """清理超时未活跃的会话（节流：至多每 5 分钟执行一次）"""
     global _last_cleanup_ts
     now = time.time()
-    if now - _last_cleanup_ts < _CLEANUP_INTERVAL:
-        return
-    _last_cleanup_ts = now
-
-    stale_sessions = []
-    stale_mobiles = []
     with _lock:
+        if now - _last_cleanup_ts < _CLEANUP_INTERVAL:
+            return
+        _last_cleanup_ts = now
+
+        stale_sessions = []
+        stale_mobiles = []
         for sid, mk in list(_session_to_mobile.items()):
             if mk in _bots:
                 _, ts = _bots[mk]

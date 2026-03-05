@@ -72,7 +72,14 @@ class ParkingBot:
             start_work_time = datetime.datetime.strptime(self.config["start_time"], "%H:%M:%S").time()
             end_work_time = datetime.datetime.strptime(self.config["end_time"], "%H:%M:%S").time()
             
-            if not (start_work_time <= current_time <= end_work_time):
+            # 处理跨天工作时间配置
+            is_working_time = False
+            if start_work_time <= end_work_time:
+                is_working_time = start_work_time <= current_time <= end_work_time
+            else:
+                is_working_time = current_time >= start_work_time or current_time <= end_work_time
+                
+            if not is_working_time:
                 self.status = "待机休眠中"
                 tomorrow_start = datetime.datetime.combine(
                     now.date() + datetime.timedelta(days=1 if current_time > end_work_time else 0), 
@@ -96,7 +103,12 @@ class ParkingBot:
             
             # 2. Work Logic
             self.status = "正在寻找车位"
-            status_code, trade_no = self._attempt_book_cycle()
+            try:
+                status_code, trade_no = self._attempt_book_cycle()
+            except Exception as e:
+                self.log(f"[-] 搜索或预定发生异常: {str(e)[:100]}...")
+                status_code, trade_no = "CONTINUE_POLL", None
+                time.sleep(5)
             
             if status_code == "NEED_LOGIN":
                 pwd = self.config.get("password_md5") or ""
@@ -106,8 +118,12 @@ class ParkingBot:
                     self.status = "Token过期请重登"
                     break
                 self.log("正在尝试重新登录获取最新 Token...")
-                login_res = do_login(self.config["mobile"], pwd, self.config["lng"], self.config["lat"])
-                self.token = login_res.get("result", {}).get("token")
+                try:
+                    login_res = do_login(self.config["mobile"], pwd, self.config["lng"], self.config["lat"])
+                    self.token = login_res.get("result", {}).get("token")
+                except Exception as e:
+                    self.log(f"[-] 重新登录网络异常: {e}")
+                    self.token = None
                 if self.token:
                     self.log("重新登录成功！可以继续发包...")
                 else:
@@ -121,7 +137,11 @@ class ParkingBot:
                 self.current_trade_no = trade_no
                 self.log(f"🚗 成功锁定车位！正在查询订单信息...")
                 
-                order_res = get_order(self.token, trade_no, self.config["lng"], self.config["lat"])
+                try:
+                    order_res = get_order(self.token, trade_no, self.config["lng"], self.config["lat"])
+                except Exception as e:
+                    self.log(f"[-] 查询订单详情异常: {e}")
+                    order_res = {}
                 
                 enter_deadline_ms = order_res.get("result", {}).get("enterDeadline")
                 
@@ -151,7 +171,12 @@ class ParkingBot:
                         
                     if self.is_running:
                         self.log(f"⏰ 时间到！准备主动取消上笔订单 {trade_no} 以防止系统发呆...")
-                        cancel_res = cancel_order(self.token, trade_no, self.config["lng"], self.config["lat"])
+                        try:
+                            cancel_res = cancel_order(self.token, trade_no, self.config["lng"], self.config["lat"])
+                        except Exception as e:
+                            self.log(f"[-] 发起取消订单请求异常: {e}")
+                            cancel_res = {}
+                            
                         if cancel_res.get("code") == 200:
                             self.log("[+] 主动取消成功！已回归票池，立刻发起新的占坑循环抢回！")
                         else:
