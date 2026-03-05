@@ -50,5 +50,9 @@ export const useAuthStore = defineStore('auth', () => {
     config.value = null
   }
 
-  return { config, isLoggedIn, hasLocation, loadConfig, doLogin, doLoginWithSms, doLogout }
+  function setConfig(val: Config | null): void {
+    config.value = val
+  }
+
+  return { config, isLoggedIn, hasLocation, loadConfig, doLogin, doLoginWithSms, doLogout, setConfig }
 })

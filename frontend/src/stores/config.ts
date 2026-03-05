@@ -2,7 +2,7 @@
  * 配置向导状态：城市、停车场、车牌选择
  */
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, unref } from 'vue'
 import * as api from '@/api'
 import { useAuthStore } from './auth'
 import type { City, Park, Plate, Config } from '@/types'
@@ -22,8 +22,8 @@ export const useConfigStore = defineStore('config', () => {
   const loadingPlates = ref(false)
   const saving = ref(false)
 
-  /** @returns 当前配置快捷引用 */
-  function cfg(): Config | null { return auth.config }
+  /** @returns 当前配置（unref 解包 Pinia ref 以正确读取 city_id 等） */
+  function cfg(): Config | null { return unref(auth.config) }
 
   const filteredParks = computed(() => {
     const q = parkSearch.value.trim().toLowerCase()
@@ -64,7 +64,7 @@ export const useConfigStore = defineStore('config', () => {
   function patchConfig(patch: Partial<Config>): void {
     const c = cfg()
     if (!c) return
-    auth.config = { ...c, ...patch }
+    auth.setConfig({ ...c, ...patch })
   }
 
   async function fetchCities(): Promise<void> {

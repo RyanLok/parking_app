@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { unref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useConfigStore } from '@/stores/config'
 
@@ -26,7 +27,7 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
-  if (!auth.config) {
+  if (!unref(auth.config)) {
     await auth.loadConfig()
     useConfigStore().restoreNames()
   }

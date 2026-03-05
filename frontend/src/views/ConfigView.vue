@@ -3,7 +3,7 @@
  * 单页配置：定位、目标选择、工作时间，全部在一个页面展示
  * 不再是 3 步向导，所有区块随时可编辑
  */
-import { computed } from 'vue'
+import { computed, unref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useConfigStore } from '@/stores/config'
@@ -16,7 +16,7 @@ const auth = useAuthStore()
 const cfg = useConfigStore()
 const bot = useBotStore()
 
-const c = computed(() => auth.config)
+const c = computed(() => unref(auth.config))
 const hasCityId = computed(() => (c.value?.city_id ?? 0) > 0)
 
 function updateField(field: string, value: string | number): void {
