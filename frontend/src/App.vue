@@ -89,42 +89,47 @@ async function handleLogout(): Promise<void> {
 .topbar-inner {
   max-width: 640px;
   margin: 0 auto;
-  padding: 0 16px;
-  height: 52px;
+  padding: 0 12px;
+  height: 48px;
   display: flex;
   align-items: center;
-  gap: 8px; /* Reduced gap for smaller screens */
+  gap: 6px;
+  white-space: nowrap; /* 所有子元素一行显示 */
 }
 .brand { 
-  font-size: 16px; 
+  font-size: 15px; 
   font-weight: 700; 
   margin-right: auto;
-  white-space: nowrap; /* Prevent title wrapping */
-  flex-shrink: 0; 
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .conn {
-  display: flex; align-items: center; gap: 4px;
-  font-size: 12px; color: var(--c-text3);
+  display: flex; align-items: center; gap: 3px;
+  font-size: 11px; color: var(--c-text3);
   white-space: nowrap;
+  flex-shrink: 0;
 }
-.conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c-text3); }
+.conn-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c-text3); }
 .dot-on .conn-dot { background: var(--c-green); }
 .dot-off .conn-dot { background: var(--c-danger); }
 
-.nav-links { display: flex; gap: 4px; }
+.nav-links { display: flex; gap: 2px; flex-shrink: 0; }
 .nav-link {
-  padding: 6px 12px;
+  padding: 5px 8px;
   border-radius: var(--r-sm);
   font-size: 13px;
   font-weight: 500;
   color: var(--c-text2);
+  white-space: nowrap;
   transition: background .15s, color .15s;
 }
 .nav-link:hover { background: #f3f4f6; color: var(--c-text); }
 .nav-link.active { background: #f0fdfa; color: var(--c-primary); }
 
-.btn-logout { font-size: 13px; color: var(--c-text3); }
+.btn-logout { font-size: 13px; color: var(--c-text3); flex-shrink: 0; }
 .btn-logout:hover { color: var(--c-danger); }
 
 .main-area {

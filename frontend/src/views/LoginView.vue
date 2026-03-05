@@ -201,7 +201,7 @@ async function submit(): Promise<void> {
 .login-card {
   width: 100%;
   max-width: 380px;
-  padding: 36px 28px;
+  padding: 28px 20px;
 }
 .login-header {
   text-align: center;
@@ -227,14 +227,15 @@ async function submit(): Promise<void> {
 }
 .mode-tab {
   flex: 1;
-  padding: 8px 16px;
-  font-size: 14px;
+  padding: 8px 10px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--c-text2);
   background: transparent;
   border: none;
   border-radius: 6px;
   cursor: pointer;
+  white-space: nowrap;
   transition: all 0.15s;
 }
 .mode-tab:hover {
@@ -267,7 +268,9 @@ async function submit(): Promise<void> {
 }
 .btn-sms {
   flex-shrink: 0;
-  min-width: 100px;
+  min-width: 90px;
   white-space: nowrap;
+  font-size: 12px;
+  padding: 0 8px;
 }
 </style>
