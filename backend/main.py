@@ -25,8 +25,9 @@ from bot import ParkingBot
 
 app = FastAPI(title="Auto Parking API")
 
-# CORS：生产环境应从环境变量读取
-CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+# CORS：环境变量 CORS_ORIGINS 覆盖，默认含本地开发 + 常见 Vercel 域名
+_DEFAULT_CORS = "http://localhost:5173,http://127.0.0.1:5173,https://parking-app-brown-two.vercel.app"
+CORS_ORIGINS = [o.strip() for o in (os.environ.get("CORS_ORIGINS") or _DEFAULT_CORS).split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in CORS_ORIGINS],
@@ -320,6 +321,7 @@ def auth_sms_login(body: SmsLoginModel, session_id: str = Depends(_get_session_i
     token = result.get("token") if isinstance(result, dict) else None
     if not token:
         msg = res.get("desc", "验证码错误或已过期") or "验证码错误或已过期"
+        logger.warning("验证码登录失败 mobile=%s res=%s", mobile[:3] + "****", res)
         raise HTTPException(status_code=401, detail=str(msg))
 
     # 验证码登录：无密码，仅存 token，token 过期需重新验证码登录

@@ -82,10 +82,9 @@ def send_sms_code(mobile, user_lng, user_lat):
 def login_with_sms(mobile_b64, sms_code, user_lng, user_lat):
     """
     验证码登录：传入 base64 编码的 mobile + 6 位验证码
-    URL: https://pm.airparking.cn/app/sms/login
-    传 mobile( base64 ) + smsCode
+    接口：/app/user/login2（与密码登录同一端点，传 smsCode 替代 password）
     """
-    url = "https://pm.airparking.cn/app/sms/login"
+    url = "https://pm.airparking.cn/app/user/login2"
 
     headers = {
         "version-tag": "release",
