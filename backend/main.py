@@ -149,6 +149,8 @@ def _get_bot_by_mobile(mobile_key: str) -> ParkingBot:
     bot = ParkingBot()
     if saved:
         bot.config.update(saved)
+        if "token" in saved and saved["token"]:
+            bot.token = saved["token"]
 
     with _lock:
         # double-check：并发时可能另一个线程已经创建了
@@ -275,6 +277,7 @@ def auth_login(body: LoginModel, session_id: str = Depends(_get_session_id)):
     bot.config["password_md5"] = password_md5
     bot.config["lng"] = lng
     bot.config["lat"] = lat
+    bot.config["token"] = token
     bot.token = token
 
     # 绑定 session → mobile
@@ -354,6 +357,7 @@ def auth_sms_login(body: SmsLoginModel, session_id: str = Depends(_get_session_i
     bot.config["password_md5"] = ""
     bot.config["lng"] = lng
     bot.config["lat"] = lat
+    bot.config["token"] = token
     bot.token = token
 
     with _lock:

@@ -59,6 +59,8 @@ export const useBotStore = defineStore('bot', () => {
   async function toggle(): Promise<void> {
     if (loading.value) return
     loading.value = true
+    // 暂停轮询，防止旧的 status 响应覆盖 toggle 后的最新状态
+    stopPolling()
     try {
       if (status.value.is_running) {
         await api.stopBot()
@@ -66,8 +68,11 @@ export const useBotStore = defineStore('bot', () => {
         await api.startBot()
       }
       await fetchStatus()
+      await fetchLogs()
     } finally {
       loading.value = false
+      // 恢复轮询
+      startPolling()
     }
   }
 
