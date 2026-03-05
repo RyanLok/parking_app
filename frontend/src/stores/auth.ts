@@ -11,7 +11,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isLoggedIn = computed(() => {
     const c = config.value
-    return !!(c?.mobile?.trim() && c?.password_md5?.trim())
+    return !!c?.mobile?.trim()
   })
 
   const hasLocation = computed(() => {
@@ -28,10 +28,19 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
-   * @returns 登录后 bot 是否正在运行（同一手机号可能已有 bot）
+   * 密码登录
    */
   async function doLogin(mobile: string, password: string): Promise<{ is_running: boolean }> {
     const res = await api.login(mobile, password)
+    await loadConfig()
+    return { is_running: res.is_running }
+  }
+
+  /**
+   * 验证码登录
+   */
+  async function doLoginWithSms(mobile: string, smsCode: string): Promise<{ is_running: boolean }> {
+    const res = await api.loginWithSms(mobile, smsCode)
     await loadConfig()
     return { is_running: res.is_running }
   }
@@ -41,5 +50,5 @@ export const useAuthStore = defineStore('auth', () => {
     config.value = null
   }
 
-  return { config, isLoggedIn, hasLocation, loadConfig, doLogin, doLogout }
+  return { config, isLoggedIn, hasLocation, loadConfig, doLogin, doLoginWithSms, doLogout }
 })

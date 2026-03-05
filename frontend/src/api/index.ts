@@ -7,12 +7,36 @@ import type { Config, City, Park, Plate, BotStatus } from '@/types'
 export { errMsg }
 
 /**
- * @returns 登录后 bot 的实时状态（可能该手机号已有 bot 在跑）
+ * 密码登录
+ * @returns 登录后 bot 的实时状态
  */
 export async function login(mobile: string, password: string): Promise<{ is_running: boolean; status: string }> {
   const { data } = await api.post<{ success: boolean; is_running: boolean; status: string }>(
     '/auth/login',
     { mobile: mobile.trim(), password: password.trim() },
+  )
+  return data
+}
+
+/**
+ * 发送验证码
+ */
+export async function sendSmsCode(mobile: string, lng?: string, lat?: string): Promise<void> {
+  await api.post('/auth/sms/send', {
+    mobile: mobile.trim(),
+    ...(lng && { lng }),
+    ...(lat && { lat }),
+  })
+}
+
+/**
+ * 验证码登录
+ * @returns 登录后 bot 的实时状态
+ */
+export async function loginWithSms(mobile: string, smsCode: string): Promise<{ is_running: boolean; status: string }> {
+  const { data } = await api.post<{ success: boolean; is_running: boolean; status: string }>(
+    '/auth/sms/login',
+    { mobile: mobile.trim(), sms_code: smsCode.trim() },
   )
   return data
 }

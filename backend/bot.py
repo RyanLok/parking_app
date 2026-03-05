@@ -99,10 +99,15 @@ class ParkingBot:
             status_code, trade_no = self._attempt_book_cycle()
             
             if status_code == "NEED_LOGIN":
+                pwd = self.config.get("password_md5") or ""
+                if not pwd.strip():
+                    self.log("[-] 验证码登录用户 Token 已过期，无法自动续登，请重新登录。")
+                    self.is_running = False
+                    self.status = "Token过期请重登"
+                    break
                 self.log("正在尝试重新登录获取最新 Token...")
-                login_res = do_login(self.config["mobile"], self.config["password_md5"], self.config["lng"], self.config["lat"])
+                login_res = do_login(self.config["mobile"], pwd, self.config["lng"], self.config["lat"])
                 self.token = login_res.get("result", {}).get("token")
-                
                 if self.token:
                     self.log("重新登录成功！可以继续发包...")
                 else:

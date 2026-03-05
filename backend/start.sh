@@ -12,13 +12,16 @@ export PORT=${PORT:-8000}
 # 替换为你 Vercel 部署后的实际域名
 export CORS_ORIGINS="${CORS_ORIGINS:-https://your-app.vercel.app,https://your-custom-domain.com}"
 
-echo "🚀 启动 Parking API..."
+echo "🚀 启动 Parking API (Gunicorn + UvicornWorker)..."
 echo "   端口: $PORT"
 echo "   CORS: $CORS_ORIGINS"
 echo "   数据目录: $(pwd)/data"
 
-exec python3 -m uvicorn main:app \
-  --host 0.0.0.0 \
-  --port "$PORT" \
-  --workers 1 \
+# 注意：workers 必须为 1，因 bot 实例在进程内存中，多 worker 无法共享
+exec gunicorn main:app \
+  -w 1 \
+  -k uvicorn.workers.UvicornWorker \
+  -b "0.0.0.0:$PORT" \
+  --access-logfile - \
+  --error-logfile - \
   --log-level info

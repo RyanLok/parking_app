@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
-from api_simulator import get_park_list, get_city_list, get_plate_list, do_login
+from api_simulator import get_park_list, get_city_list, get_plate_list, do_login, send_sms_code, login_with_sms
 from bot import ParkingBot
 
 app = FastAPI(title="Auto Parking API")
@@ -165,9 +165,24 @@ def get_bot(session_id: str = Depends(_get_session_id)) -> ParkingBot:
 
 # ========== Pydantic Models ==========
 class LoginModel(BaseModel):
-    """登录请求"""
+    """密码登录请求"""
     mobile: str
     password: str
+    lng: Optional[str] = None
+    lat: Optional[str] = None
+
+
+class SmsSendModel(BaseModel):
+    """发送验证码请求"""
+    mobile: str
+    lng: Optional[str] = None
+    lat: Optional[str] = None
+
+
+class SmsLoginModel(BaseModel):
+    """验证码登录请求"""
+    mobile: str
+    sms_code: str
     lng: Optional[str] = None
     lat: Optional[str] = None
 
@@ -242,6 +257,83 @@ def auth_login(body: LoginModel, session_id: str = Depends(_get_session_id)):
         _session_to_mobile[session_id] = mobile_b64
 
     # 持久化
+    _save_config(mobile_b64, bot.config)
+
+    return {
+        "success": True,
+        "is_running": bot.is_running,
+        "status": bot.status,
+    }
+
+
+@app.post("/api/auth/sms/send")
+def auth_sms_send(body: SmsSendModel, session_id: str = Depends(_get_session_id)):
+    """
+    发送验证码到手机号
+    """
+    mobile = (body.mobile or "").strip()
+    if not mobile or len(mobile) != 11:
+        raise HTTPException(status_code=400, detail="请输入正确的11位手机号")
+
+    bot = get_bot(session_id)
+    lng = body.lng or bot.config.get("lng") or "113.430183"
+    lat = body.lat or bot.config.get("lat") or "23.181934"
+
+    try:
+        res = send_sms_code(mobile, lng, lat)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"发送验证码失败：{str(e)[:80]}")
+
+    if res.get("code") != 200:
+        msg = res.get("desc", "发送失败") or "发送失败"
+        raise HTTPException(status_code=400, detail=str(msg))
+
+    return {"success": True, "message": "验证码已发送"}
+
+
+@app.post("/api/auth/sms/login")
+def auth_sms_login(body: SmsLoginModel, session_id: str = Depends(_get_session_id)):
+    """
+    验证码登录：验证通过后绑定 session，与密码登录效果一致
+    """
+    mobile = (body.mobile or "").strip()
+    sms_code = (body.sms_code or "").strip()
+    if not mobile or len(mobile) != 11:
+        raise HTTPException(status_code=400, detail="请输入正确的11位手机号")
+    if not sms_code or len(sms_code) != 6:
+        raise HTTPException(status_code=400, detail="请输入6位验证码")
+
+    mobile_b64 = base64.b64encode(mobile.encode("utf-8")).decode("utf-8")
+    bot = _get_bot_by_mobile(mobile_b64)
+    lng = body.lng or bot.config.get("lng") or "113.430183"
+    lat = body.lat or bot.config.get("lat") or "23.181934"
+
+    try:
+        res = login_with_sms(mobile_b64, sms_code, lng, lat)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"登录服务暂时不可用：{str(e)[:80]}")
+
+    if not isinstance(res, dict):
+        raise HTTPException(status_code=502, detail="登录服务返回格式异常")
+
+    result = res.get("result", {}) or {}
+    token = result.get("token") if isinstance(result, dict) else None
+    if not token:
+        msg = res.get("desc", "验证码错误或已过期") or "验证码错误或已过期"
+        raise HTTPException(status_code=401, detail=str(msg))
+
+    # 验证码登录：无密码，仅存 token，token 过期需重新验证码登录
+    bot.config["mobile"] = mobile_b64
+    bot.config["password_md5"] = ""
+    bot.config["lng"] = lng
+    bot.config["lat"] = lat
+    bot.token = token
+
+    with _lock:
+        old_tmp = f"_tmp_{session_id}"
+        _bots.pop(old_tmp, None)
+        _session_to_mobile[session_id] = mobile_b64
+
     _save_config(mobile_b64, bot.config)
 
     return {
@@ -345,11 +437,12 @@ def _ensure_token(bot: ParkingBot, lng: str, lat: str) -> None:
 
 
 def _check_bot_ready(bot: ParkingBot) -> None:
-    """校验配置完整"""
+    """校验配置完整（支持密码登录或验证码登录的 token）"""
     cfg = bot.config
     ok = lambda v: v is not None and v != "" and str(v).strip() != ""
     ok_id = lambda v: isinstance(v, (int, float)) and v > 0
-    if not ok(cfg.get("mobile")) or not ok(cfg.get("password_md5")):
+    has_auth = ok(cfg.get("mobile")) and (ok(cfg.get("password_md5")) or ok(cfg.get("token")))
+    if not has_auth:
         raise HTTPException(status_code=400, detail="请先登录")
     if not ok(cfg.get("lng")) or not ok(cfg.get("lat")):
         raise HTTPException(status_code=400, detail="请填写经度、纬度")

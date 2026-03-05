@@ -40,8 +40,9 @@ export const useConfigStore = defineStore('config', () => {
     if (!c) return false
     const ok = (v: unknown) => v !== '' && v != null && String(v).trim() !== ''
     const okId = (v: unknown) => typeof v === 'number' && v > 0
+    const hasAuth = ok(c.mobile) && (ok(c.password_md5) || ok(c.token))
     return (
-      ok(c.mobile) && ok(c.password_md5) &&
+      hasAuth &&
       ok(c.lng) && ok(c.lat) &&
       okId(c.city_id) && okId(c.park_id) && okId(c.plate_id)
     )

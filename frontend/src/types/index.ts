@@ -2,6 +2,8 @@
 export interface Config {
   mobile: string
   password_md5: string
+  /** 验证码登录时有 token 无 password_md5 */
+  token?: string | null
   lng: string
   lat: string
   park_id: number

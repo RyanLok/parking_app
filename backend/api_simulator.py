@@ -50,6 +50,65 @@ def generate_timestamp():
     """
     return str(int(time.time() * 1000))
 
+def send_sms_code(mobile, user_lng, user_lat):
+    """
+    发送验证码到手机
+    URL: https://pm.airparking.cn/app/sms/login
+    仅传 mobile（明文），不传 smsCode，接口会下发短信
+    """
+    url = "https://pm.airparking.cn/app/sms/login"
+
+    headers = {
+        "version-tag": "release",
+        "username": "",
+        "Host": "pm.airparking.cn",
+        "User-Agent": "okhttp/3.11.0",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+
+    params = BASE_PARAMS.copy()
+    params.update({
+        "mobile": str(mobile).strip(),
+        "userLng": str(user_lng),
+        "userLat": str(user_lat),
+        "timestamp": generate_timestamp(),
+    })
+    params["sign"] = generate_sign(params)
+
+    response = requests.post(url, headers=headers, data=params)
+    return response.json()
+
+
+def login_with_sms(mobile_b64, sms_code, user_lng, user_lat):
+    """
+    验证码登录：传入 base64 编码的 mobile + 6 位验证码
+    URL: https://pm.airparking.cn/app/sms/login
+    传 mobile( base64 ) + smsCode
+    """
+    url = "https://pm.airparking.cn/app/sms/login"
+
+    headers = {
+        "version-tag": "release",
+        "username": "",
+        "Host": "pm.airparking.cn",
+        "User-Agent": "okhttp/3.11.0",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+
+    params = BASE_PARAMS.copy()
+    params.update({
+        "mobile": mobile_b64,
+        "smsCode": str(sms_code).strip(),
+        "userLng": str(user_lng),
+        "userLat": str(user_lat),
+        "timestamp": generate_timestamp(),
+    })
+    params["sign"] = generate_sign(params)
+
+    response = requests.post(url, headers=headers, data=params)
+    return response.json()
+
+
 def do_login(mobile, password, user_lng, user_lat):
     """
     模拟登录请求

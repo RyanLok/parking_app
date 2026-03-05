@@ -12,84 +12,106 @@
 
 ## 一、后端部署（云服务器）
 
-### 1. 环境准备
+### 方式 A：宝塔部署（推荐）
+
+#### 1. 安装 Python 项目管理器
+
+宝塔面板 → **软件商店** → 搜索 **Python 项目管理器** → 安装
+
+#### 2. 上传代码
+
+- 用宝塔 **文件** 或 SFTP 把 `backend/` 目录上传到服务器，例如：`/www/wwwroot/parking/backend/`
+- 确保 `main.py`、`bot.py`、`api_simulator.py`、`requirements.txt` 都在该目录下
+
+#### 3. 添加 Python 项目
+
+宝塔 → **软件商店** → **Python 项目管理器** → **添加项目**
+
+| 配置项 | 值 |
+|--------|-----|
+| 项目名称 | parking-api |
+| 项目路径 | `/www/wwwroot/parking/backend` |
+| Python 版本 | 3.10 或以上 |
+| 框架 | 其他 |
+| 启动方式 | **gunicorn** |
+| 启动文件 | `main:app` |
+| 运行端口 | 8000 |
+
+若使用 gunicorn，需在「启动参数」或「配置文件」中增加：`-k uvicorn.workers.UvicornWorker -w 1`（FastAPI 为 ASGI，须用 UvicornWorker；workers 必须为 1 以共享 bot 内存）。
+
+若无 gunicorn 选项，可选 **uvicorn**，启动文件填 `main:app`。
+
+**环境变量**（点击「环境变量」或「项目设置」添加）：
+
+| 变量名 | 值 |
+|--------|-----|
+| ENV | prod |
+| CORS_ORIGINS | https://你的项目.vercel.app |
+| PORT | 8000 |
+
+#### 4. 创建站点并配置反向代理
+
+宝塔 → **网站** → **添加站点**
+
+- 域名：`api.你的域名.com`（或单独二级域名）
+- 根目录：任意（不填也可）
+- PHP 版本：纯静态
+
+**站点创建后** → 点击站点 → **设置** → **反向代理** → **添加反向代理**
+
+| 配置项 | 值 |
+|--------|-----|
+| 代理名称 | parking-api |
+| 目标 URL | `http://127.0.0.1:8000` |
+| 发送域名 | `$host` |
+
+保存后，在 **配置文件** 里确认 `location /` 被正确代理到 8000。
+
+#### 5. 配置 SSL
+
+站点设置 → **SSL** → **Let's Encrypt** → 申请证书 → 强制 HTTPS
+
+> 必须开启 HTTPS，否则 Vercel 前端无法访问（Mixed Content 拦截）
+
+#### 6. 确保项目运行
+
+Python 项目管理器 → 找到 parking-api → 点击 **启动** 或 **重启**，状态变为「运行中」
+
+---
+
+### 方式 B：命令行 + systemd（无宝塔）
+
+`start.sh` 使用 **Gunicorn + UvicornWorker** 启动，进程管理更稳健。
+
+#### 1. 环境准备
 
 ```bash
-# 安装 Python 3.10+
 sudo apt update && sudo apt install -y python3 python3-pip python3-venv
-
-# 上传代码到服务器
 scp -r backend/ user@your-server:/opt/parking_app/backend/
 
-# 创建虚拟环境
 cd /opt/parking_app/backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. 配置环境变量
+#### 2. 配置环境变量
 
-编辑 `start.sh`，修改 `CORS_ORIGINS` 为你的 Vercel 域名：
+编辑 `start.sh`，修改 `CORS_ORIGINS` 为你的 Vercel 域名。
 
-```bash
-export CORS_ORIGINS="https://your-app.vercel.app"
-```
-
-如有自定义域名，逗号分隔追加即可。
-
-### 3. 启动方式
-
-**方式 A：systemd（推荐）**
+#### 3. 启动方式
 
 ```bash
-# 编辑 parking.service 中的路径和域名
+./start.sh   # 或用 systemd：
 sudo cp parking.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable parking
 sudo systemctl start parking
-
-# 查看日志
-sudo journalctl -u parking -f
 ```
 
-**方式 B：手动运行**
+#### 4. Nginx 反向代理
 
-```bash
-cd /opt/parking_app/backend
-source venv/bin/activate
-ENV=prod CORS_ORIGINS="https://your-app.vercel.app" ./start.sh
-```
-
-### 4. Nginx 反向代理（推荐）
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name api.your-domain.com;
-
-    ssl_certificate     /etc/ssl/your-cert.pem;
-    ssl_certificate_key /etc/ssl/your-key.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-> **重要**：后端必须通过 HTTPS 暴露，否则 Vercel（HTTPS）的前端无法请求 HTTP 的后端（混合内容被浏览器拦截）。
-
-### 5. 防火墙
-
-```bash
-# 只允许 Nginx 转发，不直接暴露 8000 端口
-sudo ufw allow 443/tcp
-sudo ufw allow 80/tcp
-```
+按需配置 Nginx 反代到 8000 端口，并绑定 SSL 证书。
 
 ---
 
