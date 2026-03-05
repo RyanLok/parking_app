@@ -71,23 +71,26 @@ onUnmounted(() => bot.stopPolling())
 
     <!-- 状态卡片 -->
     <div class="status-card card">
+      <!-- 当前状态 badge -->
       <div class="status-top">
-        <span class="badge" :class="statusClass">{{ bot.status.status }}</span>
+        <span class="badge" :class="statusClass">{{ bot.status.status || '未启动' }}</span>
       </div>
 
+      <!-- 已抢到车位：显示订单信息和取消按钮 -->
       <div v-if="bot.status.current_trade_no" class="booked-block">
-        <div class="booked-label">已锁定车位</div>
-        <div class="booked-order">#{{ bot.status.current_trade_no }}</div>
-        <div class="booked-countdown">{{ bot.countdown || '—' }}</div>
+        <div class="booked-label">🚗 已锁定车位</div>
+        <div class="booked-order">订单号 #{{ bot.status.current_trade_no }}</div>
+        <div v-if="bot.countdown" class="booked-countdown">{{ bot.countdown }}</div>
         <button
-          class="btn btn-outline btn-cancel-order"
+          class="btn btn-outline btn-block btn-cancel-order"
           :disabled="cancelling"
           @click="handleCancel"
         >
-          {{ cancelling ? '取消中…' : '取消订单（释放车位）' }}
+          {{ cancelling ? '取消中…' : '主动释放车位' }}
         </button>
       </div>
 
+      <!-- 主操作按钮：开始/停止 -->
       <button
         class="btn btn-block btn-lg"
         :class="bot.status.is_running ? 'btn-danger' : 'btn-primary'"
@@ -118,18 +121,25 @@ onUnmounted(() => bot.stopPolling())
 .status-top { margin-bottom: 16px; }
 
 .booked-block {
-  margin: 16px auto;
+  margin: 0 auto 16px;
   padding: 16px;
-  max-width: 280px;
+  max-width: 300px;
   background: #eff6ff;
   border: 1px solid #bfdbfe;
   border-radius: var(--r-sm);
 }
-.booked-label { font-size: 13px; font-weight: 600; color: #1d4ed8; }
-.booked-order { font-size: 12px; color: var(--c-text2); margin-top: 2px; }
+.booked-label { font-size: 14px; font-weight: 600; color: #1d4ed8; }
+.booked-order { font-size: 12px; color: var(--c-text2); margin-top: 4px; }
 .booked-countdown {
   font-size: 28px; font-weight: 700;
   font-family: 'SF Mono', monospace;
-  color: var(--c-blue); margin-top: 4px;
+  color: var(--c-blue); margin-top: 6px;
 }
+.btn-cancel-order {
+  margin-top: 12px;
+  color: var(--c-danger);
+  border-color: var(--c-danger);
+  font-size: 13px;
+}
+.btn-cancel-order:hover { background: #fef2f2; }
 </style>
