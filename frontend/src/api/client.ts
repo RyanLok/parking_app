@@ -22,7 +22,12 @@ function sessionId(): string {
 export const api = axios.create({
   baseURL: BASE,
   timeout: 15000,
-  headers: { 'X-Session-Id': sessionId() },
+})
+
+// 每次请求带上当前 session，避免模块加载时机问题
+api.interceptors.request.use((cfg) => {
+  cfg.headers.set('X-Session-Id', sessionId())
+  return cfg
 })
 
 export function errMsg(e: unknown): string {

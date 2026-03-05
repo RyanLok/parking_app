@@ -3,6 +3,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import axios from 'axios'
 import * as api from '@/api'
 import type { Config } from '@/types'
 
@@ -22,8 +23,11 @@ export const useAuthStore = defineStore('auth', () => {
   async function loadConfig(): Promise<void> {
     try {
       config.value = await api.getConfig()
-    } catch {
-      config.value = null
+    } catch (e: unknown) {
+      // 仅 401 时清空，避免网络抖动导致误判未登录
+      if (axios.isAxiosError(e) && e.response?.status === 401) {
+        config.value = null
+      }
     }
   }
 

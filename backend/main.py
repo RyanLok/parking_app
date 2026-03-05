@@ -49,6 +49,34 @@ _lock = threading.Lock()
 SESSION_TIMEOUT = 24 * 3600
 _last_cleanup_ts: float = 0.0
 _CLEANUP_INTERVAL = 300  # 5 分钟清理一次
+_SESSIONS_FILE = DATA_DIR / "sessions.json"
+
+
+def _load_sessions() -> None:
+    """启动时恢复 session 映射，刷新/重启后用户免重登"""
+    if not _SESSIONS_FILE.exists():
+        return
+    try:
+        data = json.loads(_SESSIONS_FILE.read_text())
+        if isinstance(data, dict):
+            _session_to_mobile.update(data)
+            logger.info("恢复 %d 个 session 映射", len(data))
+    except Exception as exc:
+        logger.warning("加载 sessions 失败: %s", exc)
+
+
+def _save_sessions() -> None:
+    """持久化 session 映射"""
+    try:
+        with _lock:
+            data = dict(_session_to_mobile)
+        _SESSIONS_FILE.write_text(json.dumps(data, ensure_ascii=False))
+    except Exception as exc:
+        logger.warning("保存 sessions 失败: %s", exc)
+
+
+# 启动时恢复
+_load_sessions()
 
 
 def _config_path(mobile_key: str) -> Path:
@@ -104,7 +132,8 @@ def _cleanup_stale() -> None:
                 stale_mobiles.append(mk)
         for mk in stale_mobiles:
             del _bots[mk]
-    if stale_mobiles:
+    if stale_sessions or stale_mobiles:
+        _save_sessions()
         logger.info("清理过期会话: %d 个 session, %d 个 bot", len(stale_sessions), len(stale_mobiles))
 
 
@@ -252,12 +281,10 @@ def auth_login(body: LoginModel, session_id: str = Depends(_get_session_id)):
 
     # 绑定 session → mobile
     with _lock:
-        # 清理此 session 之前的临时 bot
         old_tmp = f"_tmp_{session_id}"
         _bots.pop(old_tmp, None)
         _session_to_mobile[session_id] = mobile_b64
-
-    # 持久化
+    _save_sessions()
     _save_config(mobile_b64, bot.config)
 
     return {
@@ -335,7 +362,7 @@ def auth_sms_login(body: SmsLoginModel, session_id: str = Depends(_get_session_i
         old_tmp = f"_tmp_{session_id}"
         _bots.pop(old_tmp, None)
         _session_to_mobile[session_id] = mobile_b64
-
+    _save_sessions()
     _save_config(mobile_b64, bot.config)
 
     return {
@@ -350,11 +377,12 @@ def auth_logout(
     bot: ParkingBot = Depends(get_bot),
     session_id: str = Depends(_get_session_id),
 ):
-    """退出登录：解绑 session，不销毁 bot（如果还在运行就保留）"""
+    """退出登录：解绑 session"""
     if bot.is_running:
         raise HTTPException(status_code=400, detail="请先停止机器人")
     with _lock:
         _session_to_mobile.pop(session_id, None)
+    _save_sessions()
     return {"success": True}
 
 
