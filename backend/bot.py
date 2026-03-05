@@ -25,6 +25,8 @@ class ParkingBot:
         }
         self.token = None
         self._on_token_change = None  # 回调：token 变更时通知外部持久化
+        self._on_log = None  # 回调：日志变更时通知外部持久化
+        self._log_save_counter = 0  # 节流计数器，每 5 条日志存一次盘
         
         # State info for frontend
         self.current_trade_no = None
@@ -36,7 +38,16 @@ class ParkingBot:
         self.logs.append(log_entry)
         print(log_entry)
         if len(self.logs) > 200:
-            self.logs = self.logs[-200:] # limit log size
+            self.logs = self.logs[-200:]
+        # 节流持久化：每 5 条日志或重要日志时存盘
+        self._log_save_counter += 1
+        is_important = any(k in msg for k in ('✅', '❌', '启动', '停止', '退出', '成功', '失败', '过期'))
+        if self._on_log and (self._log_save_counter >= 5 or is_important):
+            self._log_save_counter = 0
+            try:
+                self._on_log(self)
+            except Exception:
+                pass
 
     def start(self):
         if self.is_running:

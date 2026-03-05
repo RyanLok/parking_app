@@ -99,6 +99,34 @@ def _save_config(mobile_key: str, config: dict) -> None:
         logger.warning("保存配置失败 [%s]: %s", mobile_key[:8], exc)
 
 
+def _logs_path(mobile_key: str) -> Path:
+    """用户日志文件路径"""
+    safe = hashlib.sha256(mobile_key.encode()).hexdigest()[:16]
+    return DATA_DIR / f"{safe}.logs.json"
+
+
+def _save_logs(mobile_key: str, logs: list) -> None:
+    """持久化日志到磁盘（只保留最近 200 条）"""
+    try:
+        p = _logs_path(mobile_key)
+        p.write_text(json.dumps(logs[-200:], ensure_ascii=False))
+    except Exception:
+        pass
+
+
+def _load_logs(mobile_key: str) -> list:
+    """从磁盘加载日志"""
+    p = _logs_path(mobile_key)
+    if p.exists():
+        try:
+            data = json.loads(p.read_text())
+            if isinstance(data, list):
+                return data[-200:]
+        except Exception:
+            pass
+    return []
+
+
 def _load_config(mobile_key: str) -> Optional[dict]:
     """从磁盘加载配置"""
     p = _config_path(mobile_key)
@@ -163,6 +191,16 @@ def _get_bot_by_mobile(mobile_key: str) -> ParkingBot:
     def _persist_on_token_change(b: ParkingBot) -> None:
         _save_config(_mk, b.config)
     bot._on_token_change = _persist_on_token_change
+
+    # 注册日志持久化回调
+    def _persist_logs(b: ParkingBot) -> None:
+        _save_logs(_mk, b.logs)
+    bot._on_log = _persist_logs
+
+    # 从磁盘恢复日志
+    saved_logs = _load_logs(mobile_key)
+    if saved_logs:
+        bot.logs = saved_logs
 
     with _lock:
         # double-check：并发时可能另一个线程已经创建了

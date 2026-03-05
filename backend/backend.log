@@ -1,63 +1,23 @@
 /Applications/ServBay/script/alias/python3: line 306: local: can only be used in a function
 INFO:     Will watch for changes in these directories: ['/Users/luoyanjun/test/parking_app/backend']
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [2365] using StatReload
-INFO:     Started server process [2425]
+INFO:     Started reloader process [28814] using StatReload
+INFO:     Started server process [28828]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 WARNING:  StatReload detected changes in 'main.py'. Reloading...
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [2425]
-INFO:     Started server process [14508]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-WARNING:  StatReload detected changes in 'main.py'. Reloading...
-INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [14508]
-INFO:     Started server process [18780]
+INFO:     Finished server process [28828]
+INFO:     Started server process [34136]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 WARNING:  StatReload detected changes in 'bot.py'. Reloading...
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [18780]
-INFO:     Started server process [20806]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-WARNING:  StatReload detected changes in 'main.py'. Reloading...
-INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [20806]
-INFO:     Started server process [21432]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-WARNING:  StatReload detected changes in 'main.py'. Reloading...
-INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [21432]
-INFO:     Started server process [25521]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-WARNING:  StatReload detected changes in 'bot.py'. Reloading...
-INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [25521]
-INFO:     Started server process [26440]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-WARNING:  StatReload detected changes in 'main.py'. Reloading...
-INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [26440]
-INFO:     Started server process [26517]
+INFO:     Finished server process [34136]
+INFO:     Started server process [34984]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
