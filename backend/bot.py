@@ -195,13 +195,16 @@ class ParkingBot:
                     self.log(f"策略：将在 {safe_keep_seconds // 60} 分 {safe_keep_seconds % 60} 秒后主动取消，无缝续租...")
                     
                     for remaining in range(safe_keep_seconds, 0, -1):
-                        if not self.is_running:
+                        if not self.is_running or not self.current_trade_no:
                             break
                         if remaining % 60 == 0:
                             self.log(f"距离主动释放续租开抢，还剩大约 {remaining // 60} 分钟...")
                         time.sleep(1)
-                        
-                    if self.is_running:
+                    
+                    # 如果是手动取消导致跳出，不需要再取消
+                    if not self.current_trade_no:
+                        self.log("ℹ️ 订单已被手动取消，立即继续抢位...")
+                    elif self.is_running:
                         self.log(f"⏰ 时间到！准备主动取消上笔订单 {trade_no} 以防止系统发呆...")
                         try:
                             cancel_res = cancel_order(self.token, trade_no, self.config["lng"], self.config["lat"])
@@ -218,7 +221,7 @@ class ParkingBot:
                     self.log("[-] 获取订单过期时间失败，退回默认预估休眠 14.5 分钟...")
                     self.deadline_ts = time.time() + (14.5 * 60)
                     for _ in range(int(14.5 * 60)):
-                        if not self.is_running: break
+                        if not self.is_running or not self.current_trade_no: break
                         time.sleep(1)
                         
                 self.current_trade_no = None

@@ -236,31 +236,42 @@ def _get_session_id(x_session_id: Optional[str] = Header(None, alias="X-Session-
     return x_session_id.strip()
 
 
+def _read_sessions_from_disk() -> dict:
+    """每次都从磁盘读 sessions.json，确保始终与磁盘一致"""
+    try:
+        if _SESSIONS_FILE.exists():
+            data = json.loads(_SESSIONS_FILE.read_text())
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+
 def get_bot(session_id: str = Depends(_get_session_id)) -> ParkingBot:
     """
     严格按 session_id 返回对应用户的 Bot，确保多用户隔离。
-    - 已登录：session → mobile → 该用户唯一 Bot
-    - 未登录：临时 bot，互不影响
+    始终以磁盘 sessions.json 为准，不依赖内存中的映射。
     """
     _cleanup_stale()
+
+    # 1. 先查内存
     with _lock:
         mobile_key = _session_to_mobile.get(session_id)
-    
-    # 内存中没找到，尝试从磁盘重新加载（服务重启后内存可能与磁盘不同步）
+
+    # 2. 内存没有就查磁盘（磁盘是唯一可信源）
     if not mobile_key:
-        try:
-            if _SESSIONS_FILE.exists():
-                disk_data = json.loads(_SESSIONS_FILE.read_text())
-                if isinstance(disk_data, dict) and session_id in disk_data:
-                    mobile_key = disk_data[session_id]
-                    with _lock:
-                        _session_to_mobile[session_id] = mobile_key
-                    logger.info("从磁盘恢复 session 映射: %s -> %s", session_id[:8], mobile_key[:8])
-        except Exception as exc:
-            logger.warning("回读 sessions.json 失败: %s", exc)
-    
+        disk_sessions = _read_sessions_from_disk()
+        mobile_key = disk_sessions.get(session_id)
+        if mobile_key:
+            with _lock:
+                _session_to_mobile[session_id] = mobile_key
+
     if mobile_key:
-        return _get_bot_by_mobile(mobile_key)
+        bot = _get_bot_by_mobile(mobile_key)
+        bot._debug_match = f"ok,mk={mobile_key[:8]},bot={id(bot)}"
+        return bot
+
     # 未登录的 session，创建临时 bot
     now = time.time()
     with _lock:
@@ -268,9 +279,11 @@ def get_bot(session_id: str = Depends(_get_session_id)) -> ParkingBot:
         if temp_key in _bots:
             bot, _ = _bots[temp_key]
             _bots[temp_key] = (bot, now)
+            bot._debug_match = f"tmp,bot={id(bot)}"
             return bot
         bot = ParkingBot()
         _bots[temp_key] = (bot, now)
+        bot._debug_match = f"tmp_new,bot={id(bot)}"
         return bot
 
 
@@ -475,6 +488,7 @@ def get_status(bot: ParkingBot = Depends(get_bot)):
         "status": bot.status,
         "current_trade_no": bot.current_trade_no,
         "deadline_ts": bot.deadline_ts,
+        "_debug": getattr(bot, '_debug_match', 'unknown'),
     }
 
 
@@ -608,6 +622,7 @@ def cancel_current_order(bot: ParkingBot = Depends(get_bot)):
         bot.log("[+] 手动取消订单成功，车位已释放！")
         bot.current_trade_no = None
         bot.deadline_ts = 0
+        bot.status = "正在寻找车位" if bot.is_running else "未启动"
         return {"message": "订单已取消，车位已释放"}
     else:
         msg = res.get("desc", "取消失败") or "取消失败"
@@ -637,5 +652,6 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=int(os.environ.get("PORT", "8000")),
         reload=is_dev,
+        reload_excludes=["data/*"] if is_dev else None,
         workers=1 if is_dev else int(os.environ.get("WORKERS", "1")),
     )
