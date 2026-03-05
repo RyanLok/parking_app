@@ -24,6 +24,7 @@ class ParkingBot:
             "safe_cancel_advance": 10
         }
         self.token = None
+        self._on_token_change = None  # 回调：token 变更时通知外部持久化
         
         # State info for frontend
         self.current_trade_no = None
@@ -58,8 +59,23 @@ class ParkingBot:
         return True, "Bot stop requested"
 
     def update_config(self, new_config):
+        # 确保数值类型字段不会被存为字符串
+        for k in ('park_id', 'city_id', 'plate_id', 'poll_interval', 'safe_cancel_advance'):
+            if k in new_config and new_config[k] is not None:
+                try:
+                    new_config[k] = int(new_config[k])
+                except (ValueError, TypeError):
+                    pass
         self.config.update(new_config)
         self.log("⚙️ 配置已更新")
+
+    @staticmethod
+    def _parse_time(t_str):
+        """解析时间字符串，支持 HH:MM:SS 和 HH:MM 两种格式"""
+        try:
+            return datetime.datetime.strptime(t_str, "%H:%M:%S").time()
+        except ValueError:
+            return datetime.datetime.strptime(t_str, "%H:%M").time()
 
     # The original loop, adapted to check self.is_running
     def _run_loop(self):
@@ -67,16 +83,9 @@ class ParkingBot:
             # 1. Time Control
             now = datetime.datetime.now()
             current_time = now.time()
-            
-            # parse config times
-            def _parse_time(t_str):
-                try:
-                    return datetime.datetime.strptime(t_str, "%H:%M:%S").time()
-                except ValueError:
-                    return datetime.datetime.strptime(t_str, "%H:%M").time()
 
-            start_work_time = _parse_time(self.config["start_time"])
-            end_work_time = _parse_time(self.config["end_time"])
+            start_work_time = self._parse_time(self.config["start_time"])
+            end_work_time = self._parse_time(self.config["end_time"])
             # 处理跨天工作时间配置
             is_working_time = False
             if start_work_time <= end_work_time:
@@ -131,7 +140,15 @@ class ParkingBot:
                     self.log(f"[-] 重新登录网络异常: {e}")
                     self.token = None
                 if self.token:
+                    self.config["token"] = self.token
                     self.log("重新登录成功！可以继续发包...")
+                    # 回调持久化
+                    if self._on_token_change:
+                        try:
+                            self._on_token_change(self)
+                        except Exception:
+                            pass
+                else:
                     self.log("[-] 重新登录失败，无法拿到有效 Token，延迟 10 秒后重试。")
                     time.sleep(10)
                     continue

@@ -13,7 +13,7 @@ import os
 import time
 import threading
 from pathlib import Path
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Union
 
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -67,11 +67,13 @@ def _load_sessions() -> None:
 
 
 def _save_sessions() -> None:
-    """持久化 session 映射"""
+    """持久化 session 映射（原子写入，防止崩溃时写出半截文件）"""
     try:
         with _lock:
             data = dict(_session_to_mobile)
-        _SESSIONS_FILE.write_text(json.dumps(data, ensure_ascii=False))
+        tmp = _SESSIONS_FILE.with_suffix('.tmp')
+        tmp.write_text(json.dumps(data, ensure_ascii=False))
+        tmp.replace(_SESSIONS_FILE)
     except Exception as exc:
         logger.warning("保存 sessions 失败: %s", exc)
 
@@ -87,9 +89,12 @@ def _config_path(mobile_key: str) -> Path:
 
 
 def _save_config(mobile_key: str, config: dict) -> None:
-    """持久化配置到磁盘"""
+    """持久化配置到磁盘（原子写入）"""
     try:
-        _config_path(mobile_key).write_text(json.dumps(config, ensure_ascii=False, indent=2))
+        p = _config_path(mobile_key)
+        tmp = p.with_suffix('.tmp')
+        tmp.write_text(json.dumps(config, ensure_ascii=False, indent=2))
+        tmp.replace(p)
     except Exception as exc:
         logger.warning("保存配置失败 [%s]: %s", mobile_key[:8], exc)
 
@@ -121,8 +126,9 @@ def _cleanup_stale() -> None:
                 _, ts = _bots[mk]
                 if now - ts > SESSION_TIMEOUT:
                     stale_sessions.append(sid)
-            else:
-                stale_sessions.append(sid)
+            # 如果 mobile_key 不在 _bots 中，可能是还没被加载，不要误删
+            # else:
+            #     stale_sessions.append(sid)
         for sid in stale_sessions:
             _session_to_mobile.pop(sid, None)
         for mk, (bot, ts) in list(_bots.items()):
@@ -152,6 +158,12 @@ def _get_bot_by_mobile(mobile_key: str) -> ParkingBot:
         if "token" in saved and saved["token"]:
             bot.token = saved["token"]
 
+    # 注册持久化回调：bot 运行中 token 变更时自动存盘
+    _mk = mobile_key
+    def _persist_on_token_change(b: ParkingBot) -> None:
+        _save_config(_mk, b.config)
+    bot._on_token_change = _persist_on_token_change
+
     with _lock:
         # double-check：并发时可能另一个线程已经创建了
         if mobile_key in _bots:
@@ -178,6 +190,20 @@ def get_bot(session_id: str = Depends(_get_session_id)) -> ParkingBot:
     _cleanup_stale()
     with _lock:
         mobile_key = _session_to_mobile.get(session_id)
+    
+    # 内存中没找到，尝试从磁盘重新加载（服务重启后内存可能与磁盘不同步）
+    if not mobile_key:
+        try:
+            if _SESSIONS_FILE.exists():
+                disk_data = json.loads(_SESSIONS_FILE.read_text())
+                if isinstance(disk_data, dict) and session_id in disk_data:
+                    mobile_key = disk_data[session_id]
+                    with _lock:
+                        _session_to_mobile[session_id] = mobile_key
+                    logger.info("从磁盘恢复 session 映射: %s -> %s", session_id[:8], mobile_key[:8])
+        except Exception as exc:
+            logger.warning("回读 sessions.json 失败: %s", exc)
+    
     if mobile_key:
         return _get_bot_by_mobile(mobile_key)
     # 未登录的 session，创建临时 bot
@@ -220,20 +246,21 @@ class SmsLoginModel(BaseModel):
 class ConfigModel(BaseModel):
     """配置项模型"""
     mobile: str
-    password_md5: str
+    password_md5: str = ""
     lng: str
     lat: str
-    park_id: int
-    city_id: int
-    plate_id: int
+    park_id: Union[int, str]
+    city_id: Union[int, str]
+    plate_id: Union[int, str]
     expect_leave_time: str
     start_time: str
     end_time: str
-    poll_interval: int
-    safe_cancel_advance: int
+    poll_interval: int = 5
+    safe_cancel_advance: int = 10
     city_name: Optional[str] = None
     park_name: Optional[str] = None
     plate_no: Optional[str] = None
+    token: Optional[str] = None
 
 
 # ========== API Routes ==========
@@ -405,6 +432,9 @@ def get_logs(bot: ParkingBot = Depends(get_bot)):
 @app.get("/api/config")
 def get_config(bot: ParkingBot = Depends(get_bot)):
     """获取配置"""
+    # 如果 bot 没有登录信息，返回 401 而不是返回空配置
+    if not bot.config.get("mobile"):
+        raise HTTPException(status_code=401, detail="请先登录")
     cfg = dict(bot.config)
     cfg["token"] = bot.token
     return cfg
@@ -461,6 +491,9 @@ def _ensure_token(bot: ParkingBot, lng: str, lat: str) -> None:
     try:
         res = do_login(m, p, lng, lat)
         bot.token = res.get("result", {}).get("token")
+        if bot.token:
+            bot.config["token"] = bot.token
+            _save_config(m, bot.config)
     except Exception:
         pass
     if not bot.token:
@@ -471,7 +504,7 @@ def _check_bot_ready(bot: ParkingBot) -> None:
     """校验配置完整（支持密码登录或验证码登录的 token）"""
     cfg = bot.config
     ok = lambda v: v is not None and v != "" and str(v).strip() != ""
-    ok_id = lambda v: isinstance(v, (int, float)) and v > 0
+    ok_id = lambda v: v is not None and (isinstance(v, (int, float)) and v > 0 or (isinstance(v, str) and v.isdigit() and int(v) > 0))
     has_auth = ok(cfg.get("mobile")) and (ok(cfg.get("password_md5")) or ok(cfg.get("token")))
     if not has_auth:
         raise HTTPException(status_code=400, detail="请先登录")

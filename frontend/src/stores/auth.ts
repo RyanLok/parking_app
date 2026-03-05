@@ -22,7 +22,13 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function loadConfig(): Promise<void> {
     try {
-      config.value = await api.getConfig()
+      const newCfg = await api.getConfig()
+      // 仅在返回了有效配置（含 mobile）时才覆盖，防止短暂的空响应冲掉已有状态
+      if (newCfg?.mobile?.trim()) {
+        config.value = newCfg
+      } else if (!config.value) {
+        config.value = newCfg
+      }
     } catch (e: unknown) {
       // 仅 401 时清空，避免网络抖动导致误判未登录
       if (axios.isAxiosError(e) && e.response?.status === 401) {
