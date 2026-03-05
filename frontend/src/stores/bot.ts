@@ -31,8 +31,17 @@ export const useBotStore = defineStore('bot', () => {
     }
   }
 
+  /**
+   * 拉取日志；若本次返回空且已有日志，则不覆盖，避免闪烁
+   */
   async function fetchLogs(): Promise<void> {
-    try { logs.value = await api.getLogs() } catch { /* ignore */ }
+    try {
+      const newLogs = await api.getLogs()
+      // 避免空响应覆盖已有日志导致「暂无日志」与正常内容交替闪烁
+      if (newLogs.length > 0 || logs.value.length === 0) {
+        logs.value = newLogs
+      }
+    } catch { /* ignore */ }
   }
 
   function updateCountdown(): void {

@@ -2,7 +2,7 @@
 /**
  * 登录页：支持密码登录、验证码登录
  */
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useBotStore } from '@/stores/bot'
@@ -66,9 +66,10 @@ async function submit(): Promise<void> {
     busy.value = true
     try {
       const { is_running } = await auth.doLogin(m, p)
+      await nextTick()
       toastOk(is_running ? '登录成功，机器人正在运行中' : '登录成功')
       bot.startPolling()
-      router.push('/')
+      await router.replace({ name: 'dashboard' })
     } catch (e) {
       toastErr(errMsg(e))
     } finally {
@@ -83,9 +84,10 @@ async function submit(): Promise<void> {
     busy.value = true
     try {
       const { is_running } = await auth.doLoginWithSms(m, code)
+      await nextTick()
       toastOk(is_running ? '登录成功，机器人正在运行中' : '登录成功')
       bot.startPolling()
-      router.push('/')
+      await router.replace({ name: 'dashboard' })
     } catch (e) {
       toastErr(errMsg(e))
     } finally {

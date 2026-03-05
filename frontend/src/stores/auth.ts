@@ -37,6 +37,9 @@ export const useAuthStore = defineStore('auth', () => {
   async function doLogin(mobile: string, password: string): Promise<{ is_running: boolean }> {
     const res = await api.login(mobile, password)
     await loadConfig()
+    if (!config.value?.mobile?.trim()) {
+      throw new Error('登录成功但获取配置失败，请重试')
+    }
     return { is_running: res.is_running }
   }
 
@@ -46,6 +49,9 @@ export const useAuthStore = defineStore('auth', () => {
   async function doLoginWithSms(mobile: string, smsCode: string): Promise<{ is_running: boolean }> {
     const res = await api.loginWithSms(mobile, smsCode)
     await loadConfig()
+    if (!config.value?.mobile?.trim()) {
+      throw new Error('登录成功但获取配置失败，请重试')
+    }
     return { is_running: res.is_running }
   }
 
