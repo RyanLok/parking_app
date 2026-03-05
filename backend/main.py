@@ -1,0 +1,407 @@
+"""
+共享停车抢单 API 服务
+隔离策略：用手机号（mobile_b64）作为用户唯一 key
+- 同一手机号无论从哪个浏览器登录，都操作同一个 Bot
+- 配置持久化到 data/{mobile_hash}.json，重启不丢
+- session_id 只是临时连接标识，登录后绑定到手机号
+"""
+import base64
+import hashlib
+import json
+import logging
+import os
+import time
+import threading
+from pathlib import Path
+from typing import Dict, Tuple, Optional
+
+from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import uvicorn
+
+from api_simulator import get_park_list, get_city_list, get_plate_list, do_login
+from bot import ParkingBot
+
+app = FastAPI(title="Auto Parking API")
+
+# CORS：生产环境应从环境变量读取
+CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in CORS_ORIGINS],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
+# ========== 数据目录 ==========
+DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR.mkdir(exist_ok=True)
+
+# ========== 注册表 ==========
+# 两层映射：session_id → mobile_key, mobile_key → (Bot, last_ts)
+_session_to_mobile: Dict[str, str] = {}
+_bots: Dict[str, Tuple[ParkingBot, float]] = {}
+_lock = threading.Lock()
+SESSION_TIMEOUT = 24 * 3600
+_last_cleanup_ts: float = 0.0
+_CLEANUP_INTERVAL = 300  # 5 分钟清理一次
+
+
+def _config_path(mobile_key: str) -> Path:
+    """用户配置文件路径"""
+    safe = hashlib.sha256(mobile_key.encode()).hexdigest()[:16]
+    return DATA_DIR / f"{safe}.json"
+
+
+logger = logging.getLogger("parking")
+
+
+def _save_config(mobile_key: str, config: dict) -> None:
+    """持久化配置到磁盘"""
+    try:
+        _config_path(mobile_key).write_text(json.dumps(config, ensure_ascii=False, indent=2))
+    except Exception as exc:
+        logger.warning("保存配置失败 [%s]: %s", mobile_key[:8], exc)
+
+
+def _load_config(mobile_key: str) -> Optional[dict]:
+    """从磁盘加载配置"""
+    p = _config_path(mobile_key)
+    if p.exists():
+        try:
+            return json.loads(p.read_text())
+        except Exception:
+            pass
+    return None
+
+
+def _cleanup_stale() -> None:
+    """清理超时未活跃的会话（节流：至多每 5 分钟执行一次）"""
+    global _last_cleanup_ts
+    now = time.time()
+    if now - _last_cleanup_ts < _CLEANUP_INTERVAL:
+        return
+    _last_cleanup_ts = now
+
+    stale_sessions = []
+    stale_mobiles = []
+    with _lock:
+        for sid, mk in list(_session_to_mobile.items()):
+            if mk in _bots:
+                _, ts = _bots[mk]
+                if now - ts > SESSION_TIMEOUT:
+                    stale_sessions.append(sid)
+            else:
+                stale_sessions.append(sid)
+        for sid in stale_sessions:
+            _session_to_mobile.pop(sid, None)
+        for mk, (bot, ts) in list(_bots.items()):
+            if now - ts > SESSION_TIMEOUT and not bot.is_running:
+                stale_mobiles.append(mk)
+        for mk in stale_mobiles:
+            del _bots[mk]
+    if stale_mobiles:
+        logger.info("清理过期会话: %d 个 session, %d 个 bot", len(stale_sessions), len(stale_mobiles))
+
+
+def _get_bot_by_mobile(mobile_key: str) -> ParkingBot:
+    """根据手机号获取或创建 Bot（已登录用户）"""
+    now = time.time()
+    with _lock:
+        if mobile_key in _bots:
+            bot, _ = _bots[mobile_key]
+            _bots[mobile_key] = (bot, now)
+            return bot
+
+    # 磁盘 I/O 在锁外执行，避免阻塞其他请求
+    saved = _load_config(mobile_key)
+    bot = ParkingBot()
+    if saved:
+        bot.config.update(saved)
+
+    with _lock:
+        # double-check：并发时可能另一个线程已经创建了
+        if mobile_key in _bots:
+            existing, _ = _bots[mobile_key]
+            _bots[mobile_key] = (existing, now)
+            return existing
+        _bots[mobile_key] = (bot, now)
+        return bot
+
+
+def _get_session_id(x_session_id: Optional[str] = Header(None, alias="X-Session-Id")) -> str:
+    """提取并校验 session ID"""
+    if not x_session_id or not x_session_id.strip():
+        raise HTTPException(status_code=400, detail="缺少 X-Session-Id，请刷新页面重试")
+    return x_session_id.strip()
+
+
+def get_bot(session_id: str = Depends(_get_session_id)) -> ParkingBot:
+    """
+    获取当前 session 对应的 Bot
+    - 已登录：session → mobile → bot
+    - 未登录：返回临时空 bot（仅能查看，不能操作）
+    """
+    _cleanup_stale()
+    with _lock:
+        mobile_key = _session_to_mobile.get(session_id)
+    if mobile_key:
+        return _get_bot_by_mobile(mobile_key)
+    # 未登录的 session，创建临时 bot
+    now = time.time()
+    with _lock:
+        temp_key = f"_tmp_{session_id}"
+        if temp_key in _bots:
+            bot, _ = _bots[temp_key]
+            _bots[temp_key] = (bot, now)
+            return bot
+        bot = ParkingBot()
+        _bots[temp_key] = (bot, now)
+        return bot
+
+
+# ========== Pydantic Models ==========
+class LoginModel(BaseModel):
+    """登录请求"""
+    mobile: str
+    password: str
+    lng: Optional[str] = None
+    lat: Optional[str] = None
+
+
+class ConfigModel(BaseModel):
+    """配置项模型"""
+    mobile: str
+    password_md5: str
+    lng: str
+    lat: str
+    park_id: int
+    city_id: int
+    plate_id: int
+    expect_leave_time: str
+    start_time: str
+    end_time: str
+    poll_interval: int
+    safe_cancel_advance: int
+    city_name: Optional[str] = None
+    park_name: Optional[str] = None
+    plate_no: Optional[str] = None
+
+
+# ========== API Routes ==========
+@app.post("/api/auth/login")
+def auth_login(body: LoginModel, session_id: str = Depends(_get_session_id)):
+    """
+    登录：验证通过后，将 session 绑定到该手机号的 Bot
+    - 同一手机号已有 Bot 在跑 → 直接复用，不会重复创建
+    - 配置从磁盘恢复
+    """
+    mobile = (body.mobile or "").strip()
+    password = (body.password or "").strip()
+    if not mobile or not password:
+        raise HTTPException(status_code=400, detail="请输入手机号和密码")
+
+    mobile_b64 = base64.b64encode(mobile.encode("utf-8")).decode("utf-8")
+    password_md5 = hashlib.md5(password.encode("utf-8")).hexdigest().upper()
+
+    # 获取或创建此手机号的 bot
+    bot = _get_bot_by_mobile(mobile_b64)
+
+    lng = body.lng or bot.config.get("lng") or "113.430183"
+    lat = body.lat or bot.config.get("lat") or "23.181934"
+
+    try:
+        res = do_login(mobile_b64, password_md5, lng, lat)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"登录服务暂时不可用：{str(e)[:80]}")
+
+    if not isinstance(res, dict):
+        raise HTTPException(status_code=502, detail="登录服务返回格式异常")
+
+    result = res.get("result", {}) or {}
+    token = result.get("token") if isinstance(result, dict) else None
+    if not token:
+        msg = res.get("desc", "登录失败") or "登录失败"
+        raise HTTPException(status_code=401, detail=str(msg))
+
+    # 登录成功：更新 bot 凭据
+    bot.config["mobile"] = mobile_b64
+    bot.config["password_md5"] = password_md5
+    bot.config["lng"] = lng
+    bot.config["lat"] = lat
+    bot.token = token
+
+    # 绑定 session → mobile
+    with _lock:
+        # 清理此 session 之前的临时 bot
+        old_tmp = f"_tmp_{session_id}"
+        _bots.pop(old_tmp, None)
+        _session_to_mobile[session_id] = mobile_b64
+
+    # 持久化
+    _save_config(mobile_b64, bot.config)
+
+    return {
+        "success": True,
+        "is_running": bot.is_running,
+        "status": bot.status,
+    }
+
+
+@app.post("/api/auth/logout")
+def auth_logout(
+    bot: ParkingBot = Depends(get_bot),
+    session_id: str = Depends(_get_session_id),
+):
+    """退出登录：解绑 session，不销毁 bot（如果还在运行就保留）"""
+    if bot.is_running:
+        raise HTTPException(status_code=400, detail="请先停止机器人")
+    with _lock:
+        _session_to_mobile.pop(session_id, None)
+    return {"success": True}
+
+
+@app.get("/api/status")
+def get_status(bot: ParkingBot = Depends(get_bot)):
+    """获取运行状态"""
+    return {
+        "is_running": bot.is_running,
+        "status": bot.status,
+        "current_trade_no": bot.current_trade_no,
+        "deadline_ts": bot.deadline_ts,
+    }
+
+
+@app.get("/api/logs")
+def get_logs(bot: ParkingBot = Depends(get_bot)):
+    """获取日志"""
+    return {"logs": bot.logs}
+
+
+@app.get("/api/config")
+def get_config(bot: ParkingBot = Depends(get_bot)):
+    """获取配置"""
+    return bot.config
+
+
+@app.post("/api/config")
+def update_config(config: ConfigModel, bot: ParkingBot = Depends(get_bot)):
+    """更新配置并持久化"""
+    if bot.is_running:
+        raise HTTPException(status_code=400, detail="请先停止机器人后再修改配置")
+    bot.update_config(config.model_dump())
+    mobile_key = bot.config.get("mobile", "")
+    if mobile_key:
+        _save_config(mobile_key, bot.config)
+    return {"message": "配置已保存"}
+
+
+@app.get("/api/parks")
+def fetch_parks(
+    city_id: int, lng: str, lat: str,
+    size: int = 50, page: int = 1,
+    bot: ParkingBot = Depends(get_bot),
+):
+    """获取附近停车场列表"""
+    _ensure_token(bot, lng, lat)
+    _, parks = get_park_list(bot.token, city_id, lng, lat, page=page, size=min(size, 100))
+    return {"parks": parks}
+
+
+@app.get("/api/cities")
+def fetch_cities(lng: str, lat: str, bot: ParkingBot = Depends(get_bot)):
+    """获取城市列表"""
+    _ensure_token(bot, lng, lat)
+    _, cities = get_city_list(bot.token, lng, lat)
+    return {"cities": cities}
+
+
+@app.get("/api/plates")
+def fetch_plates(lng: str, lat: str, bot: ParkingBot = Depends(get_bot)):
+    """获取车牌列表"""
+    _ensure_token(bot, lng, lat)
+    _, plates = get_plate_list(bot.token, lng, lat)
+    return {"plates": plates}
+
+
+def _ensure_token(bot: ParkingBot, lng: str, lat: str) -> None:
+    """确保 bot 有有效 token，没有则尝试重新登录"""
+    if bot.token:
+        return
+    m = bot.config.get("mobile")
+    p = bot.config.get("password_md5")
+    if not m or not p:
+        raise HTTPException(status_code=401, detail="请先登录")
+    try:
+        res = do_login(m, p, lng, lat)
+        bot.token = res.get("result", {}).get("token")
+    except Exception:
+        pass
+    if not bot.token:
+        raise HTTPException(status_code=401, detail="登录凭据已失效，请重新登录")
+
+
+def _check_bot_ready(bot: ParkingBot) -> None:
+    """校验配置完整"""
+    cfg = bot.config
+    ok = lambda v: v is not None and v != "" and str(v).strip() != ""
+    ok_id = lambda v: isinstance(v, (int, float)) and v > 0
+    if not ok(cfg.get("mobile")) or not ok(cfg.get("password_md5")):
+        raise HTTPException(status_code=400, detail="请先登录")
+    if not ok(cfg.get("lng")) or not ok(cfg.get("lat")):
+        raise HTTPException(status_code=400, detail="请填写经度、纬度")
+    if not ok_id(cfg.get("city_id")):
+        raise HTTPException(status_code=400, detail="请选择城市")
+    if not ok_id(cfg.get("park_id")):
+        raise HTTPException(status_code=400, detail="请选择停车场")
+    if not ok_id(cfg.get("plate_id")):
+        raise HTTPException(status_code=400, detail="请选择车牌")
+
+
+@app.post("/api/action/start")
+def start_bot(bot: ParkingBot = Depends(get_bot)):
+    """启动机器人"""
+    _check_bot_ready(bot)
+    success, msg = bot.start()
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"message": msg}
+
+
+@app.post("/api/action/stop")
+def stop_bot(bot: ParkingBot = Depends(get_bot)):
+    """停止机器人"""
+    success, msg = bot.stop()
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"message": msg}
+
+
+@app.get("/api/admin/sessions")
+def admin_sessions():
+    """调试：查看当前活跃用户数（生产环境应加鉴权）"""
+    with _lock:
+        users = {}
+        for mk, (bot, ts) in _bots.items():
+            if mk.startswith("_tmp_"):
+                continue
+            users[mk[:8] + "..."] = {
+                "is_running": bot.is_running,
+                "status": bot.status,
+                "last_active": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts)),
+            }
+    return {"active_users": len(users), "users": users}
+
+
+if __name__ == "__main__":
+    is_dev = os.environ.get("ENV", "dev") == "dev"
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", "8000")),
+        reload=is_dev,
+        workers=1 if is_dev else int(os.environ.get("WORKERS", "1")),
+    )
