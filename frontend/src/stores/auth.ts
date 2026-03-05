@@ -52,6 +52,8 @@ export const useAuthStore = defineStore('auth', () => {
   async function doLogout(): Promise<void> {
     await api.logout()
     config.value = null
+    const cfgStore = (await import('./config')).useConfigStore()
+    cfgStore.clearAll()
   }
 
   function setConfig(val: Config | null): void {

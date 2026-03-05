@@ -130,13 +130,24 @@ export const useConfigStore = defineStore('config', () => {
     selectedPlateNo.value = ''
   }
 
-  /** 从 config 恢复显示名称（页面刷新后调用） */
+  /** 从 config 恢复显示名称（刷新后调用） */
   function restoreNames(): void {
     const c = cfg()
     if (!c) return
-    if (c.city_name && !selectedCityName.value) selectedCityName.value = c.city_name
-    if (c.park_name && !selectedParkName.value) selectedParkName.value = c.park_name
-    if (c.plate_no && !selectedPlateNo.value) selectedPlateNo.value = c.plate_no
+    selectedCityName.value = c.city_name || ''
+    selectedParkName.value = c.park_name || ''
+    selectedPlateNo.value = c.plate_no || ''
+  }
+
+  /** 退出登录时清空选择态，避免残留到下一用户 */
+  function clearAll(): void {
+    cities.value = []
+    parks.value = []
+    plates.value = []
+    selectedCityName.value = ''
+    selectedParkName.value = ''
+    selectedPlateNo.value = ''
+    parkSearch.value = ''
   }
 
   async function save(): Promise<boolean> {
@@ -161,6 +172,6 @@ export const useConfigStore = defineStore('config', () => {
     fetchCities, fetchParks, fetchPlates,
     selectCity, selectPark, selectPlate,
     clearCity, clearPark, clearPlate,
-    restoreNames, save,
+    restoreNames, clearAll, save,
   }
 })

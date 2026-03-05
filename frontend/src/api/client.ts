@@ -24,9 +24,12 @@ export const api = axios.create({
   timeout: 15000,
 })
 
-// 每次请求带上当前 session，避免模块加载时机问题
+// 每次请求带上当前 session
 api.interceptors.request.use((cfg) => {
-  cfg.headers.set('X-Session-Id', sessionId())
+  cfg.headers = cfg.headers || {}
+  if (typeof cfg.headers === 'object' && !Array.isArray(cfg.headers)) {
+    cfg.headers['X-Session-Id'] = sessionId()
+  }
   return cfg
 })
 

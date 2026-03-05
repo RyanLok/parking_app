@@ -27,10 +27,6 @@ const connLabel = computed(() => {
 })
 
 async function handleLogout(): Promise<void> {
-  if (bot.status.is_running) {
-    toastErr('请先停止机器人再退出')
-    return
-  }
   try {
     await auth.doLogout()
     bot.stopPolling()

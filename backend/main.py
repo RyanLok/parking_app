@@ -50,6 +50,7 @@ SESSION_TIMEOUT = 24 * 3600
 _last_cleanup_ts: float = 0.0
 _CLEANUP_INTERVAL = 300  # 5 分钟清理一次
 _SESSIONS_FILE = DATA_DIR / "sessions.json"
+logger = logging.getLogger("parking")
 
 
 def _load_sessions() -> None:
@@ -83,9 +84,6 @@ def _config_path(mobile_key: str) -> Path:
     """用户配置文件路径"""
     safe = hashlib.sha256(mobile_key.encode()).hexdigest()[:16]
     return DATA_DIR / f"{safe}.json"
-
-
-logger = logging.getLogger("parking")
 
 
 def _save_config(mobile_key: str, config: dict) -> None:
@@ -171,9 +169,9 @@ def _get_session_id(x_session_id: Optional[str] = Header(None, alias="X-Session-
 
 def get_bot(session_id: str = Depends(_get_session_id)) -> ParkingBot:
     """
-    获取当前 session 对应的 Bot
-    - 已登录：session → mobile → bot
-    - 未登录：返回临时空 bot（仅能查看，不能操作）
+    严格按 session_id 返回对应用户的 Bot，确保多用户隔离。
+    - 已登录：session → mobile → 该用户唯一 Bot
+    - 未登录：临时 bot，互不影响
     """
     _cleanup_stale()
     with _lock:
@@ -374,12 +372,9 @@ def auth_sms_login(body: SmsLoginModel, session_id: str = Depends(_get_session_i
 
 @app.post("/api/auth/logout")
 def auth_logout(
-    bot: ParkingBot = Depends(get_bot),
     session_id: str = Depends(_get_session_id),
 ):
-    """退出登录：解绑 session"""
-    if bot.is_running:
-        raise HTTPException(status_code=400, detail="请先停止机器人")
+    """退出登录：解绑 session，后台任务继续运行不受影响"""
     with _lock:
         _session_to_mobile.pop(session_id, None)
     _save_sessions()

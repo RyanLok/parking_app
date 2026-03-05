@@ -19,7 +19,6 @@ export const useBotStore = defineStore('bot', () => {
   const connected = ref<boolean | null>(null)
 
   let statusTid = 0
-  let logsTid = 0
   let cdTid = 0
 
   async function fetchStatus(): Promise<void> {
@@ -63,19 +62,31 @@ export const useBotStore = defineStore('bot', () => {
     }
   }
 
-  function startPolling(): void {
-    stopPolling()
+  /** 仅当页面可见时轮询，避免多标签页互相干扰 */
+  function _tick(): void {
+    if (document.visibilityState !== 'visible') return
     fetchStatus()
     fetchLogs()
-    statusTid = window.setInterval(fetchStatus, 3000)
-    logsTid = window.setInterval(fetchLogs, 2000)
+    updateCountdown()
+  }
+
+  function _onVisibilityChange(): void {
+    if (document.visibilityState === 'visible' && statusTid) _tick()
+  }
+
+  function startPolling(): void {
+    stopPolling()
+    _tick()
+    statusTid = window.setInterval(_tick, 3000)
     cdTid = window.setInterval(updateCountdown, 1000)
+    document.addEventListener('visibilitychange', _onVisibilityChange)
   }
 
   function stopPolling(): void {
     window.clearInterval(statusTid)
-    window.clearInterval(logsTid)
     window.clearInterval(cdTid)
+    document.removeEventListener('visibilitychange', _onVisibilityChange)
+    statusTid = 0
   }
 
   return {
