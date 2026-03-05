@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useBotStore } from '@/stores/bot'
 import { useConfigStore } from '@/stores/config'
-import { errMsg } from '@/api'
+import { errMsg, cancelOrder } from '@/api'
 import { toastErr, toastOk } from '@/composables/useToast'
 import LogPanel from '@/components/LogPanel.vue'
 
@@ -31,6 +31,22 @@ async function handleToggle(): Promise<void> {
     toastOk(wasRunning ? '已停止' : '已启动')
   } catch (e) {
     toastErr(errMsg(e))
+  }
+}
+
+const cancelling = ref(false)
+async function handleCancel(): Promise<void> {
+  if (cancelling.value) return
+  cancelling.value = true
+  try {
+    await cancelOrder()
+    toastOk('订单已取消，车位已释放')
+    await bot.fetchStatus()
+    await bot.fetchLogs()
+  } catch (e) {
+    toastErr(errMsg(e))
+  } finally {
+    cancelling.value = false
   }
 }
 
@@ -63,6 +79,13 @@ onUnmounted(() => bot.stopPolling())
         <div class="booked-label">已锁定车位</div>
         <div class="booked-order">#{{ bot.status.current_trade_no }}</div>
         <div class="booked-countdown">{{ bot.countdown || '—' }}</div>
+        <button
+          class="btn btn-outline btn-cancel-order"
+          :disabled="cancelling"
+          @click="handleCancel"
+        >
+          {{ cancelling ? '取消中…' : '取消订单（释放车位）' }}
+        </button>
       </div>
 
       <button

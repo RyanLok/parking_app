@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
-from api_simulator import get_park_list, get_city_list, get_plate_list, do_login, send_sms_code, login_with_sms
+from api_simulator import get_park_list, get_city_list, get_plate_list, do_login, send_sms_code, login_with_sms, cancel_order
 from bot import ParkingBot
 
 app = FastAPI(title="Auto Parking API")
@@ -36,6 +36,23 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+
+# 禁止任何缓存，防止 nginx/CDN 缓存动态 API 响应导致返回过时数据
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+
+
+class NoCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response: Response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        return response
+
+
+app.add_middleware(NoCacheMiddleware)
 
 # ========== 数据目录 ==========
 DATA_DIR = Path(__file__).parent / "data"
@@ -573,6 +590,28 @@ def stop_bot(bot: ParkingBot = Depends(get_bot)):
     if not success:
         raise HTTPException(status_code=400, detail=msg)
     return {"message": msg}
+
+
+@app.post("/api/action/cancel")
+def cancel_current_order(bot: ParkingBot = Depends(get_bot)):
+    """手动取消当前订单，主动释放车位"""
+    trade_no = bot.current_trade_no
+    if not trade_no:
+        raise HTTPException(status_code=400, detail="当前没有进行中的订单")
+    if not bot.token:
+        raise HTTPException(status_code=401, detail="Token 无效，请重新登录")
+    try:
+        res = cancel_order(bot.token, trade_no, bot.config["lng"], bot.config["lat"])
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"取消请求失败：{str(e)[:80]}")
+    if res.get("code") == 200:
+        bot.log("[+] 手动取消订单成功，车位已释放！")
+        bot.current_trade_no = None
+        bot.deadline_ts = 0
+        return {"message": "订单已取消，车位已释放"}
+    else:
+        msg = res.get("desc", "取消失败") or "取消失败"
+        raise HTTPException(status_code=400, detail=str(msg))
 
 
 @app.get("/api/admin/sessions")

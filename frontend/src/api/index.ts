@@ -72,6 +72,10 @@ export async function stopBot(): Promise<void> {
   await api.post('/action/stop')
 }
 
+export async function cancelOrder(): Promise<void> {
+  await api.post('/action/cancel')
+}
+
 export async function getCities(lng: string, lat: string): Promise<City[]> {
   const { data } = await api.get<{ cities: City[] }>('/cities', { params: { lng, lat } })
   return data.cities || []
