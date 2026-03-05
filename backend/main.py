@@ -401,7 +401,9 @@ def get_logs(bot: ParkingBot = Depends(get_bot)):
 @app.get("/api/config")
 def get_config(bot: ParkingBot = Depends(get_bot)):
     """获取配置"""
-    return bot.config
+    cfg = dict(bot.config)
+    cfg["token"] = bot.token
+    return cfg
 
 
 @app.post("/api/config")

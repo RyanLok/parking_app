@@ -93,13 +93,20 @@ async function handleLogout(): Promise<void> {
   height: 52px;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 8px; /* Reduced gap for smaller screens */
 }
-.brand { font-size: 16px; font-weight: 700; margin-right: auto; }
+.brand { 
+  font-size: 16px; 
+  font-weight: 700; 
+  margin-right: auto;
+  white-space: nowrap; /* Prevent title wrapping */
+  flex-shrink: 0; 
+}
 
 .conn {
-  display: flex; align-items: center; gap: 5px;
+  display: flex; align-items: center; gap: 4px;
   font-size: 12px; color: var(--c-text3);
+  white-space: nowrap;
 }
 .conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c-text3); }
 .dot-on .conn-dot { background: var(--c-green); }

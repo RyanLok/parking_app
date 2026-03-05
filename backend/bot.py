@@ -69,9 +69,14 @@ class ParkingBot:
             current_time = now.time()
             
             # parse config times
-            start_work_time = datetime.datetime.strptime(self.config["start_time"], "%H:%M:%S").time()
-            end_work_time = datetime.datetime.strptime(self.config["end_time"], "%H:%M:%S").time()
-            
+            def _parse_time(t_str):
+                try:
+                    return datetime.datetime.strptime(t_str, "%H:%M:%S").time()
+                except ValueError:
+                    return datetime.datetime.strptime(t_str, "%H:%M").time()
+
+            start_work_time = _parse_time(self.config["start_time"])
+            end_work_time = _parse_time(self.config["end_time"])
             # 处理跨天工作时间配置
             is_working_time = False
             if start_work_time <= end_work_time:
@@ -107,6 +112,7 @@ class ParkingBot:
                 status_code, trade_no = self._attempt_book_cycle()
             except Exception as e:
                 self.log(f"[-] 搜索或预定发生异常: {str(e)[:100]}...")
+                self.log("⚠️ 网络不稳定，机器人不会停止工作，将延时5秒后自动重试补单...")
                 status_code, trade_no = "CONTINUE_POLL", None
                 time.sleep(5)
             
@@ -126,11 +132,9 @@ class ParkingBot:
                     self.token = None
                 if self.token:
                     self.log("重新登录成功！可以继续发包...")
-                else:
-                    self.log("[-] 重新登录失败，无法拿到有效 Token，停止机器人。")
-                    self.is_running = False
-                    self.status = "异常停止"
-                    break
+                    self.log("[-] 重新登录失败，无法拿到有效 Token，延迟 10 秒后重试。")
+                    time.sleep(10)
+                    continue
                     
             elif status_code == "SUCCESS_BOOKED" and trade_no:
                 self.status = "已抢到车位"

@@ -3,7 +3,7 @@ import { ref, watch, nextTick } from 'vue'
 
 const props = defineProps<{ logs: string[] }>()
 
-const expanded = ref(false)
+const expanded = ref(true)
 const autoScroll = ref(true)
 const containerRef = ref<HTMLElement | null>(null)
 
@@ -24,13 +24,12 @@ function lineClass(line: string): string {
 
 <template>
   <div class="log-panel card">
-    <button class="log-header" @click="expanded = !expanded">
+    <div class="log-header">
       <span>运行日志</span>
       <span class="log-meta">
         <span v-if="logs.length" class="log-count">{{ logs.length }} 条</span>
-        <span class="log-arrow" :class="{ open: expanded }">▾</span>
       </span>
-    </button>
+    </div>
 
     <div v-if="expanded" class="log-body-wrap">
       <label class="auto-scroll-label">
@@ -49,14 +48,12 @@ function lineClass(line: string): string {
 .log-header {
   width: 100%; padding: 14px 20px;
   display: flex; justify-content: space-between; align-items: center;
-  background: transparent; border: none; cursor: pointer;
+  background: transparent; border: none;
   font-size: 14px; font-weight: 600; color: var(--c-text);
 }
-.log-header:hover { background: #fafafa; }
 .log-meta { display: flex; align-items: center; gap: 8px; }
 .log-count { font-size: 12px; font-weight: 400; color: var(--c-text3); }
-.log-arrow { font-size: 12px; color: var(--c-text3); transition: transform .2s; }
-.log-arrow.open { transform: rotate(180deg); }
+
 
 .log-body-wrap { border-top: 1px solid var(--c-border); padding: 12px 20px 20px; }
 .auto-scroll-label {
