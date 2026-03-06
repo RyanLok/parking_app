@@ -134,8 +134,6 @@ async function handleLogout(): Promise<void> {
 
 .main-area {
   flex: 1;
-  display: flex;
-  flex-direction: column;
   max-width: 640px;
   width: 100%;
   margin: 0 auto;
