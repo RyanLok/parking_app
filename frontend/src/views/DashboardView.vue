@@ -124,7 +124,7 @@ onUnmounted(() => {
     <div v-if="bot.status.token_expired" class="alert-bar alert-expired card">
       <div class="expired-title">
         <span class="alert-icon">🔑</span>
-        <span>登录已过期，请重新登录或输入验证码续登</span>
+        <span>登录已过期，请重新登录</span>
       </div>
       <div class="sms-renew-row">
         <input
