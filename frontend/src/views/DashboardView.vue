@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useBotStore } from '@/stores/bot'
 import { useConfigStore } from '@/stores/config'
-import { errMsg, cancelOrder } from '@/api'
+import { useAuthStore } from '@/stores/auth'
+import { errMsg, cancelOrder, sendSmsCode, loginWithSms } from '@/api'
 import { toastErr, toastOk } from '@/composables/useToast'
 import LogPanel from '@/components/LogPanel.vue'
 
+const router = useRouter()
 const bot = useBotStore()
 const cfg = useConfigStore()
+const auth = useAuthStore()
 
 const canStart = computed(() => cfg.canStart && bot.connected === true)
 
@@ -21,6 +25,11 @@ const statusClass = computed(() => {
 })
 
 async function handleToggle(): Promise<void> {
+  // token 过期 → 跳到登录页
+  if (bot.status.token_expired) {
+    router.push('/login')
+    return
+  }
   if (!bot.status.is_running && !canStart.value) {
     toastErr('配置未完成，无法启动')
     return
@@ -50,14 +59,101 @@ async function handleCancel(): Promise<void> {
   }
 }
 
+// ======= SMS 续登 =======
+const smsCode = ref('')
+const smsSending = ref(false)
+const smsLogging = ref(false)
+const smsCooldown = ref(0)
+let smsCdTimer = 0
+
+async function handleSendSms(): Promise<void> {
+  if (smsSending.value || smsCooldown.value > 0) return
+  const mobileB64 = auth.config?.mobile
+  if (!mobileB64) {
+    toastErr('未找到手机号，请重新登录')
+    return
+  }
+  smsSending.value = true
+  try {
+    const mobile = atob(mobileB64)
+    await sendSmsCode(mobile)
+    toastOk('验证码已发送')
+    smsCooldown.value = 60
+    smsCdTimer = window.setInterval(() => {
+      smsCooldown.value--
+      if (smsCooldown.value <= 0) clearInterval(smsCdTimer)
+    }, 1000)
+  } catch (e) {
+    toastErr(errMsg(e))
+  } finally {
+    smsSending.value = false
+  }
+}
+
+async function handleSmsRenew(): Promise<void> {
+  if (smsLogging.value || !smsCode.value.trim()) return
+  const mobileB64 = auth.config?.mobile
+  if (!mobileB64) {
+    toastErr('未找到手机号，请重新登录')
+    return
+  }
+  smsLogging.value = true
+  try {
+    const mobile = atob(mobileB64)
+    await loginWithSms(mobile, smsCode.value.trim())
+    toastOk('续登成功！')
+    smsCode.value = ''
+    await bot.fetchStatus()
+  } catch (e) {
+    toastErr(errMsg(e))
+  } finally {
+    smsLogging.value = false
+  }
+}
+
 onMounted(() => bot.startPolling())
-onUnmounted(() => bot.stopPolling())
+onUnmounted(() => {
+  bot.stopPolling()
+  clearInterval(smsCdTimer)
+})
 </script>
 
 <template>
   <div class="dashboard">
+    <!-- Token 过期续登提示 -->
+    <div v-if="bot.status.token_expired" class="alert-bar alert-expired card">
+      <div class="expired-title">
+        <span class="alert-icon">🔑</span>
+        <span>登录已过期，请重新登录或输入验证码续登</span>
+      </div>
+      <div class="sms-renew-row">
+        <input
+          v-model="smsCode"
+          class="sms-input"
+          type="text"
+          maxlength="6"
+          placeholder="6位验证码"
+          @keyup.enter="handleSmsRenew"
+        />
+        <button
+          class="btn btn-outline btn-sm"
+          :disabled="smsSending || smsCooldown > 0"
+          @click="handleSendSms"
+        >
+          {{ smsCooldown > 0 ? `${smsCooldown}s` : smsSending ? '发送中' : '发送验证码' }}
+        </button>
+        <button
+          class="btn btn-primary btn-sm"
+          :disabled="smsLogging || !smsCode.trim()"
+          @click="handleSmsRenew"
+        >
+          {{ smsLogging ? '续登中…' : '续登' }}
+        </button>
+      </div>
+    </div>
+
     <!-- 警告条 -->
-    <div v-if="!canStart && !bot.status.is_running" class="alert-bar card">
+    <div v-if="!canStart && !bot.status.is_running && !bot.status.token_expired" class="alert-bar card">
       <template v-if="bot.connected !== true">
         <span class="alert-icon">⚠</span>
         <span>引擎未连接，请确认后端已启动</span>
@@ -73,7 +169,7 @@ onUnmounted(() => bot.stopPolling())
     <div class="status-card card">
       <!-- 当前状态 badge -->
       <div class="status-top">
-        <span class="badge" :class="statusClass">{{ bot.status.status || '未启动' }}</span>
+        <span class="badge" :class="statusClass">{{ bot.status.token_expired ? '登录已过期' : (bot.status.status || '未启动') }}</span>
       </div>
 
       <!-- 已抢到车位：显示订单信息和取消按钮 -->
@@ -90,8 +186,16 @@ onUnmounted(() => bot.stopPolling())
         </button>
       </div>
 
-      <!-- 主操作按钮：开始/停止 -->
+      <!-- 主操作按钮 -->
       <button
+        v-if="bot.status.token_expired"
+        class="btn btn-block btn-lg btn-danger"
+        @click="handleToggle"
+      >
+        🔑 请重新登录
+      </button>
+      <button
+        v-else
         class="btn btn-block btn-lg"
         :class="bot.status.is_running ? 'btn-danger' : 'btn-primary'"
         :disabled="bot.loading || (!canStart && !bot.status.is_running)"
@@ -116,6 +220,23 @@ onUnmounted(() => bot.stopPolling())
 }
 .alert-icon { font-size: 16px; }
 .alert-bar .btn-sm { height: 32px; padding: 0 12px; font-size: 13px; margin-left: auto; }
+
+.alert-expired {
+  background: #fef2f2; border-color: #fca5a5; color: #991b1b;
+  flex-direction: column; align-items: stretch; gap: 10px;
+}
+.expired-title { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.sms-renew-row {
+  display: flex; gap: 8px; align-items: center;
+}
+.sms-input {
+  flex: 1; height: 36px; padding: 0 12px;
+  border: 1px solid #d1d5db; border-radius: var(--r-sm);
+  font-size: 14px; outline: none;
+  letter-spacing: 4px; text-align: center;
+}
+.sms-input:focus { border-color: var(--c-blue); }
+.sms-renew-row .btn-sm { white-space: nowrap; margin-left: 0; }
 
 .status-card { text-align: center; padding: 28px 20px; }
 .status-top { margin-bottom: 16px; }

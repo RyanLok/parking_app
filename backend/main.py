@@ -494,6 +494,7 @@ def get_status(bot: ParkingBot = Depends(get_bot)):
     debug = getattr(bot, '_debug_match', 'unknown')
     trade_no = bot.current_trade_no
     deadline = bot.deadline_ts
+    token_expired = False
 
     # 如果 bot 没在跟踪任何订单，主动查一次平台
     if not trade_no and bot.token:
@@ -503,6 +504,8 @@ def get_status(bot: ParkingBot = Depends(get_bot)):
             if info_res.get("code") == 4014:
                 if _try_refresh_token(bot):
                     info_res = get_user_info(bot.token, bot.config.get("lng", ""), bot.config.get("lat", ""))
+                else:
+                    token_expired = True
             share_order = (info_res.get("result") or {}).get("shareOrder")
             if share_order and share_order.get("tradeNo"):
                 trade_no = share_order["tradeNo"]
@@ -517,6 +520,7 @@ def get_status(bot: ParkingBot = Depends(get_bot)):
         "status": bot.status,
         "current_trade_no": trade_no,
         "deadline_ts": deadline,
+        "token_expired": token_expired,
         "_debug": f"{debug},pid={os.getpid()}",
     }
 

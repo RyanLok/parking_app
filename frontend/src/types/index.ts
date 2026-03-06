@@ -48,4 +48,5 @@ export interface BotStatus {
   status: string
   current_trade_no: string | null
   deadline_ts: number
+  token_expired?: boolean
 }
