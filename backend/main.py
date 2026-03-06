@@ -499,6 +499,10 @@ def get_status(bot: ParkingBot = Depends(get_bot)):
     if not trade_no and bot.token:
         try:
             info_res = get_user_info(bot.token, bot.config.get("lng", ""), bot.config.get("lat", ""))
+            # token 过期 → 尝试自动续登再查一次
+            if info_res.get("code") == 4014:
+                if _try_refresh_token(bot):
+                    info_res = get_user_info(bot.token, bot.config.get("lng", ""), bot.config.get("lat", ""))
             share_order = (info_res.get("result") or {}).get("shareOrder")
             if share_order and share_order.get("tradeNo"):
                 trade_no = share_order["tradeNo"]
@@ -574,23 +578,32 @@ def fetch_plates(lng: str, lat: str, bot: ParkingBot = Depends(get_bot)):
     return {"plates": plates}
 
 
+def _try_refresh_token(bot: ParkingBot) -> bool:
+    """尝试用密码重新登录刷新 token，成功返回 True"""
+    m = bot.config.get("mobile")
+    p = bot.config.get("password_md5")
+    if not m or not p:
+        return False
+    lng = bot.config.get("lng") or "113.430183"
+    lat = bot.config.get("lat") or "23.181934"
+    try:
+        res = do_login(m, p, lng, lat)
+        new_token = res.get("result", {}).get("token")
+        if new_token:
+            bot.token = new_token
+            bot.config["token"] = new_token
+            _save_config(m, bot.config)
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _ensure_token(bot: ParkingBot, lng: str, lat: str) -> None:
     """确保 bot 有有效 token，没有则尝试重新登录"""
     if bot.token:
         return
-    m = bot.config.get("mobile")
-    p = bot.config.get("password_md5")
-    if not m or not p:
-        raise HTTPException(status_code=401, detail="请先登录")
-    try:
-        res = do_login(m, p, lng, lat)
-        bot.token = res.get("result", {}).get("token")
-        if bot.token:
-            bot.config["token"] = bot.token
-            _save_config(m, bot.config)
-    except Exception:
-        pass
-    if not bot.token:
+    if not _try_refresh_token(bot):
         raise HTTPException(status_code=401, detail="登录凭据已失效，请重新登录")
 
 
@@ -640,6 +653,9 @@ def cancel_current_order(bot: ParkingBot = Depends(get_bot)):
     if not trade_no and bot.token:
         try:
             info_res = get_user_info(bot.token, bot.config.get("lng", ""), bot.config.get("lat", ""))
+            if info_res.get("code") == 4014:
+                if _try_refresh_token(bot):
+                    info_res = get_user_info(bot.token, bot.config.get("lng", ""), bot.config.get("lat", ""))
             share_order = (info_res.get("result") or {}).get("shareOrder")
             if share_order and share_order.get("tradeNo"):
                 trade_no = share_order["tradeNo"]
