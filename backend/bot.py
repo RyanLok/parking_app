@@ -134,6 +134,16 @@ class ParkingBot:
                             break
                         if remaining % 60 == 0:
                             self.log(f"距离主动释放续租开抢，还剩大约 {remaining // 60} 分钟...")
+                        # 每 30 秒检查订单是否仍然存在（防止外部取消后仍傻等）
+                        if remaining % 30 == 0 and remaining != safe_keep_seconds:
+                            try:
+                                still_active = self._check_existing_order()
+                            except Exception:
+                                still_active = True  # 查不到就假设还在
+                            if not still_active:
+                                self.log("🔔 检测到订单已在外部被取消，立即恢复抢位...")
+                                self.current_trade_no = None
+                                break
                         time.sleep(1)
 
                     if not self.current_trade_no:
@@ -287,6 +297,16 @@ class ParkingBot:
                             break
                         if remaining % 60 == 0:
                             self.log(f"距离主动释放续租开抢，还剩大约 {remaining // 60} 分钟...")
+                        # 每 30 秒检查订单是否仍然存在
+                        if remaining % 30 == 0 and remaining != safe_keep_seconds:
+                            try:
+                                still_active = self._check_existing_order()
+                            except Exception:
+                                still_active = True
+                            if not still_active:
+                                self.log("🔔 检测到订单已在外部被取消，立即恢复抢位...")
+                                self.current_trade_no = None
+                                break
                         time.sleep(1)
                     
                     # 如果是手动取消导致跳出，不需要再取消
