@@ -260,7 +260,7 @@ class ParkingBot:
         if not valid_spaces:
             # only log occasionally to avoid spam
             current_t = time.time()
-            if current_t - self.last_poll_log_time >= 30:
+            if current_t - self.last_poll_log_time >= self.config.get("poll_interval", 10):
                  self.log("当前没有符合条件的车位，持续轮询中...")
                  self.last_poll_log_time = current_t
             return "CONTINUE_POLL", None
