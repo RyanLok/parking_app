@@ -427,6 +427,42 @@ def get_city_list(token, user_lng, user_lat):
         
     return res_json, cities
 
+def get_user_info(token, user_lng, user_lat):
+    """
+    获取用户信息及当前进行中的订单
+    接口：/app/v3/user/info
+    返回 result.shareOrder 中包含当前活跃订单（如果有的话）
+    """
+    url = "https://pm.airparking.cn/app/v3/user/info"
+
+    headers = {
+        "version-tag": "release",
+        "username": token,
+        "Host": "pm.airparking.cn",
+        "User-Agent": "okhttp/3.11.0",
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+
+    params = BASE_PARAMS.copy()
+    params.update({
+        "clientType": "1",
+        "timestamp": generate_timestamp(),
+        "token": token,
+        "userLat": str(user_lat),
+        "userLng": str(user_lng)
+    })
+
+    params["sign"] = generate_sign(params)
+
+    response = requests.post(url, headers=headers, data=params, timeout=10)
+    res_json = response.json()
+
+    if res_json.get("code") == 4014:
+        print("[-] 获取用户信息时 Token 登录过期！")
+
+    return res_json
+
+
 def get_plate_list(token, user_lng, user_lat):
     """
     获取用户绑定的车牌列表

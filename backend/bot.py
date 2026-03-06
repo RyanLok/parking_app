@@ -1,7 +1,7 @@
 import datetime
 import time
 import threading
-from api_simulator import do_login, get_space_list, book_space, get_order, cancel_order
+from api_simulator import do_login, get_space_list, book_space, get_order, cancel_order, get_user_info
 
 class ParkingBot:
     def __init__(self):
@@ -127,7 +127,80 @@ class ParkingBot:
                     self.status = "正在运行"
                 continue
             
-            # 2. Work Logic
+            # 2. 先检查是否已有进行中的订单（含外部下单）
+            try:
+                existing = self._check_existing_order()
+            except Exception as e:
+                self.log(f"[-] 检查在途订单异常: {str(e)[:80]}")
+                existing = None
+
+            if existing:
+                trade_no = existing["tradeNo"]
+                enter_deadline_ms = existing.get("enterDeadline")
+                space_info = existing.get("spaceInfo", {})
+                space_code = space_info.get("spaceCode", "未知")
+                park_name = existing.get("parkName", "")
+
+                # 如果 bot 已经在跟踪这笔订单，跳过
+                if self.current_trade_no == trade_no:
+                    pass  # 已在跟踪中，走下面正常逻辑
+                else:
+                    self.log(f"🔄 检测到已有进行中的订单 {trade_no}")
+                    self.log(f"   车位: {park_name} {space_code}")
+                    self.status = "已抢到车位"
+                    self.current_trade_no = trade_no
+
+                    if enter_deadline_ms:
+                        deadline_dt = datetime.datetime.fromtimestamp(enter_deadline_ms / 1000.0)
+                        self.deadline_ts = enter_deadline_ms / 1000.0
+                        now_ts = time.time()
+
+                        sleep_seconds = int(self.deadline_ts - now_ts) + 5
+                        if sleep_seconds < 0:
+                            sleep_seconds = 5
+
+                        self.log(f"   最晚入场期限: {deadline_dt.strftime('%H:%M:%S')}")
+
+                        safe_keep_seconds = sleep_seconds - self.config["safe_cancel_advance"]
+                        if safe_keep_seconds < 0:
+                            safe_keep_seconds = 1
+
+                        self.log(f"   将在 {safe_keep_seconds // 60} 分 {safe_keep_seconds % 60} 秒后主动取消续租...")
+
+                        for remaining in range(safe_keep_seconds, 0, -1):
+                            if not self.is_running or not self.current_trade_no:
+                                break
+                            if remaining % 60 == 0:
+                                self.log(f"距离主动释放续租开抢，还剩大约 {remaining // 60} 分钟...")
+                            time.sleep(1)
+
+                        if not self.current_trade_no:
+                            self.log("ℹ️ 订单已被手动取消，立即继续抢位...")
+                        elif self.is_running:
+                            self.log(f"⏰ 时间到！准备主动取消订单 {trade_no}...")
+                            try:
+                                cancel_res = cancel_order(self.token, trade_no, self.config["lng"], self.config["lat"])
+                            except Exception as e:
+                                self.log(f"[-] 取消订单异常: {e}")
+                                cancel_res = {}
+                            if cancel_res.get("code") == 200:
+                                self.log("[+] 主动取消成功！立刻发起新的占坑循环！")
+                            else:
+                                self.log(f"[-] 主动取消失败: {cancel_res.get('desc')}")
+
+                    else:
+                        self.log("[-] 无法获取入场期限，默认休眠 14.5 分钟...")
+                        self.deadline_ts = time.time() + (14.5 * 60)
+                        for _ in range(int(14.5 * 60)):
+                            if not self.is_running or not self.current_trade_no:
+                                break
+                            time.sleep(1)
+
+                    self.current_trade_no = None
+                    self.deadline_ts = 0
+                    continue
+
+            # 3. Work Logic - 搜索并预定车位
             self.status = "正在寻找车位"
             try:
                 status_code, trade_no = self._attempt_book_cycle()
@@ -240,6 +313,21 @@ class ParkingBot:
         self.deadline_ts = 0
         self.log("⏹️ 后台机器人循环彻底退出。")
 
+
+    def _check_existing_order(self):
+        """调用 /app/v3/user/info 检查是否已有进行中的订单"""
+        if not self.token:
+            return None
+        try:
+            res = get_user_info(self.token, self.config["lng"], self.config["lat"])
+        except Exception:
+            return None
+        if res.get("code") == 4014:
+            return None  # token 过期，交给后续登录逻辑处理
+        share_order = (res.get("result") or {}).get("shareOrder")
+        if share_order and share_order.get("tradeNo"):
+            return share_order
+        return None
 
     def _attempt_book_cycle(self):
         if not self.token:
