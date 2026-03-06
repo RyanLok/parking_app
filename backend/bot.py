@@ -92,7 +92,77 @@ class ParkingBot:
     # The original loop, adapted to check self.is_running
     def _run_loop(self):
         while self.is_running:
-            # 1. Time Control
+            # ====== 1. 最高优先级：检查是否已有进行中的订单（含外部下单）======
+            # 无论是否在工作时段，都需要检测和管理已有订单
+            try:
+                existing = self._check_existing_order()
+            except Exception as e:
+                self.log(f"[-] 检查在途订单异常: {str(e)[:80]}")
+                existing = None
+
+            if existing:
+                trade_no = existing["tradeNo"]
+                enter_deadline_ms = existing.get("enterDeadline")
+                space_info = existing.get("spaceInfo", {})
+                space_code = space_info.get("spaceCode", "未知")
+                park_name = existing.get("parkName", "")
+
+                self.log(f"🔄 检测到已有进行中的订单 {trade_no}")
+                self.log(f"   车位: {park_name} {space_code}")
+                self.status = "已抢到车位"
+                self.current_trade_no = trade_no
+
+                if enter_deadline_ms:
+                    deadline_dt = datetime.datetime.fromtimestamp(enter_deadline_ms / 1000.0)
+                    self.deadline_ts = enter_deadline_ms / 1000.0
+                    now_ts = time.time()
+
+                    sleep_seconds = int(self.deadline_ts - now_ts) + 5
+                    if sleep_seconds < 0:
+                        sleep_seconds = 5
+
+                    self.log(f"   最晚入场期限: {deadline_dt.strftime('%H:%M:%S')}")
+
+                    safe_keep_seconds = sleep_seconds - self.config["safe_cancel_advance"]
+                    if safe_keep_seconds < 0:
+                        safe_keep_seconds = 1
+
+                    self.log(f"   将在 {safe_keep_seconds // 60} 分 {safe_keep_seconds % 60} 秒后主动取消续租...")
+
+                    for remaining in range(safe_keep_seconds, 0, -1):
+                        if not self.is_running or not self.current_trade_no:
+                            break
+                        if remaining % 60 == 0:
+                            self.log(f"距离主动释放续租开抢，还剩大约 {remaining // 60} 分钟...")
+                        time.sleep(1)
+
+                    if not self.current_trade_no:
+                        self.log("ℹ️ 订单已被手动取消，立即继续抢位...")
+                    elif self.is_running:
+                        self.log(f"⏰ 时间到！准备主动取消订单 {trade_no}...")
+                        try:
+                            cancel_res = cancel_order(self.token, trade_no, self.config["lng"], self.config["lat"])
+                        except Exception as e:
+                            self.log(f"[-] 取消订单异常: {e}")
+                            cancel_res = {}
+                        if cancel_res.get("code") == 200:
+                            self.log("[+] 主动取消成功！立刻发起新的占坑循环！")
+                        else:
+                            self.log(f"[-] 主动取消失败: {cancel_res.get('desc')}")
+
+                else:
+                    self.log("[-] 无法获取入场期限，默认休眠 14.5 分钟...")
+                    self.deadline_ts = time.time() + (14.5 * 60)
+                    for _ in range(int(14.5 * 60)):
+                        if not self.is_running or not self.current_trade_no:
+                            break
+                        time.sleep(1)
+
+                self.current_trade_no = None
+                self.deadline_ts = 0
+                continue  # 订单管理完毕，回到循环顶部重新检测
+
+            # ====== 2. 时间控制：不在工作时段则休眠 ======
             now = datetime.datetime.now()
             current_time = now.time()
 
@@ -116,91 +186,35 @@ class ParkingBot:
                 self.log(f"😴 当前时间不在开工时段 ({self.config['start_time']}-{self.config['end_time']})。")
                 self.log(f"进入待机模式，预计将在 {wait_seconds / 3600:.1f} 小时后自动苏醒...")
                 
-                # Check is_running periodically during long sleep
-                for _ in range(int(wait_seconds)):
+                # 休眠期间每 30 秒醒来检查一次是否有外部订单
+                slept = 0
+                woke_for_order = False
+                while slept < wait_seconds and self.is_running:
+                    # 每 30 秒检查一次外部订单
+                    nap = min(30, wait_seconds - slept)
+                    for _ in range(int(nap)):
+                        if not self.is_running:
+                            break
+                        time.sleep(1)
+                    slept += nap
                     if not self.is_running:
                         break
-                    time.sleep(1)
+                    # 检查是否有外部新订单
+                    try:
+                        ext = self._check_existing_order()
+                    except Exception:
+                        ext = None
+                    if ext:
+                        self.log("🔔 待机期间检测到新订单！立即唤醒处理...")
+                        woke_for_order = True
+                        break  # 跳出休眠，回到主循环顶部处理订单
                 
-                if self.is_running:
+                if self.is_running and not woke_for_order:
                     self.log("⏰ 早上好！开工执行任务...")
                     self.status = "正在运行"
                 continue
-            
-            # 2. 先检查是否已有进行中的订单（含外部下单）
-            try:
-                existing = self._check_existing_order()
-            except Exception as e:
-                self.log(f"[-] 检查在途订单异常: {str(e)[:80]}")
-                existing = None
 
-            if existing:
-                trade_no = existing["tradeNo"]
-                enter_deadline_ms = existing.get("enterDeadline")
-                space_info = existing.get("spaceInfo", {})
-                space_code = space_info.get("spaceCode", "未知")
-                park_name = existing.get("parkName", "")
-
-                # 如果 bot 已经在跟踪这笔订单，跳过
-                if self.current_trade_no == trade_no:
-                    pass  # 已在跟踪中，走下面正常逻辑
-                else:
-                    self.log(f"🔄 检测到已有进行中的订单 {trade_no}")
-                    self.log(f"   车位: {park_name} {space_code}")
-                    self.status = "已抢到车位"
-                    self.current_trade_no = trade_no
-
-                    if enter_deadline_ms:
-                        deadline_dt = datetime.datetime.fromtimestamp(enter_deadline_ms / 1000.0)
-                        self.deadline_ts = enter_deadline_ms / 1000.0
-                        now_ts = time.time()
-
-                        sleep_seconds = int(self.deadline_ts - now_ts) + 5
-                        if sleep_seconds < 0:
-                            sleep_seconds = 5
-
-                        self.log(f"   最晚入场期限: {deadline_dt.strftime('%H:%M:%S')}")
-
-                        safe_keep_seconds = sleep_seconds - self.config["safe_cancel_advance"]
-                        if safe_keep_seconds < 0:
-                            safe_keep_seconds = 1
-
-                        self.log(f"   将在 {safe_keep_seconds // 60} 分 {safe_keep_seconds % 60} 秒后主动取消续租...")
-
-                        for remaining in range(safe_keep_seconds, 0, -1):
-                            if not self.is_running or not self.current_trade_no:
-                                break
-                            if remaining % 60 == 0:
-                                self.log(f"距离主动释放续租开抢，还剩大约 {remaining // 60} 分钟...")
-                            time.sleep(1)
-
-                        if not self.current_trade_no:
-                            self.log("ℹ️ 订单已被手动取消，立即继续抢位...")
-                        elif self.is_running:
-                            self.log(f"⏰ 时间到！准备主动取消订单 {trade_no}...")
-                            try:
-                                cancel_res = cancel_order(self.token, trade_no, self.config["lng"], self.config["lat"])
-                            except Exception as e:
-                                self.log(f"[-] 取消订单异常: {e}")
-                                cancel_res = {}
-                            if cancel_res.get("code") == 200:
-                                self.log("[+] 主动取消成功！立刻发起新的占坑循环！")
-                            else:
-                                self.log(f"[-] 主动取消失败: {cancel_res.get('desc')}")
-
-                    else:
-                        self.log("[-] 无法获取入场期限，默认休眠 14.5 分钟...")
-                        self.deadline_ts = time.time() + (14.5 * 60)
-                        for _ in range(int(14.5 * 60)):
-                            if not self.is_running or not self.current_trade_no:
-                                break
-                            time.sleep(1)
-
-                    self.current_trade_no = None
-                    self.deadline_ts = 0
-                    continue
-
-            # 3. Work Logic - 搜索并预定车位
+            # ====== 3. 工作逻辑：搜索并预定车位 ======
             self.status = "正在寻找车位"
             try:
                 status_code, trade_no = self._attempt_book_cycle()

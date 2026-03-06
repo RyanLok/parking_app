@@ -20,13 +20,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
-from api_simulator import get_park_list, get_city_list, get_plate_list, do_login, send_sms_code, login_with_sms, cancel_order
+from api_simulator import get_park_list, get_city_list, get_plate_list, do_login, send_sms_code, login_with_sms, cancel_order, get_user_info
 from bot import ParkingBot
 
 app = FastAPI(title="Auto Parking API")
 
 # CORS：环境变量 CORS_ORIGINS 覆盖，默认含本地开发 + 常见 Vercel 域名
-_DEFAULT_CORS = "http://localhost:5173,http://127.0.0.1:5173,https://parking-app-brown-two.vercel.app"
+_DEFAULT_CORS = "http://localhost:5173,http://127.0.0.1:5173,https://parking-app-brown-two.vercel.app,https://parking-app.ideahex.workers.dev,https://parking.fluc.cc"
 CORS_ORIGINS = [o.strip() for o in (os.environ.get("CORS_ORIGINS") or _DEFAULT_CORS).split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -490,13 +490,29 @@ def auth_logout(
 
 @app.get("/api/status")
 def get_status(bot: ParkingBot = Depends(get_bot)):
-    """获取运行状态"""
+    """获取运行状态，若 bot 无跟踪订单则实时查询平台是否有进行中的订单"""
     debug = getattr(bot, '_debug_match', 'unknown')
+    trade_no = bot.current_trade_no
+    deadline = bot.deadline_ts
+
+    # 如果 bot 没在跟踪任何订单，主动查一次平台
+    if not trade_no and bot.token:
+        try:
+            info_res = get_user_info(bot.token, bot.config.get("lng", ""), bot.config.get("lat", ""))
+            share_order = (info_res.get("result") or {}).get("shareOrder")
+            if share_order and share_order.get("tradeNo"):
+                trade_no = share_order["tradeNo"]
+                enter_deadline_ms = share_order.get("enterDeadline")
+                if enter_deadline_ms:
+                    deadline = enter_deadline_ms / 1000.0
+        except Exception:
+            pass
+
     return {
         "is_running": bot.is_running,
         "status": bot.status,
-        "current_trade_no": bot.current_trade_no,
-        "deadline_ts": bot.deadline_ts,
+        "current_trade_no": trade_no,
+        "deadline_ts": deadline,
         "_debug": f"{debug},pid={os.getpid()}",
     }
 
@@ -617,8 +633,19 @@ def stop_bot(bot: ParkingBot = Depends(get_bot)):
 
 @app.post("/api/action/cancel")
 def cancel_current_order(bot: ParkingBot = Depends(get_bot)):
-    """手动取消当前订单，主动释放车位"""
+    """手动取消当前订单，主动释放车位（支持外部订单）"""
     trade_no = bot.current_trade_no
+
+    # 如果 bot 内存里没有订单，查一下平台是否有进行中的订单
+    if not trade_no and bot.token:
+        try:
+            info_res = get_user_info(bot.token, bot.config.get("lng", ""), bot.config.get("lat", ""))
+            share_order = (info_res.get("result") or {}).get("shareOrder")
+            if share_order and share_order.get("tradeNo"):
+                trade_no = share_order["tradeNo"]
+        except Exception:
+            pass
+
     if not trade_no:
         raise HTTPException(status_code=400, detail="当前没有进行中的订单")
     if not bot.token:
