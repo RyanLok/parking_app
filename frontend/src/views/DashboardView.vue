@@ -212,7 +212,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.dashboard { display: flex; flex-direction: column; gap: 16px; }
+.dashboard { display: flex; flex-direction: column; gap: 16px; flex: 1; min-height: 0; }
 
 .alert-bar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;

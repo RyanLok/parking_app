@@ -48,7 +48,7 @@ function lineClass(line: string): string {
 </template>
 
 <style scoped>
-.log-panel { padding: 0; overflow: hidden; }
+.log-panel { padding: 0; overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .log-header {
   width: 100%; padding: 14px 20px;
   display: flex; justify-content: space-between; align-items: center;
@@ -59,14 +59,15 @@ function lineClass(line: string): string {
 .log-count { font-size: 12px; font-weight: 400; color: var(--c-text3); }
 
 
-.log-body-wrap { border-top: 1px solid var(--c-border); padding: 12px 20px 20px; }
+.log-body-wrap { border-top: 1px solid var(--c-border); padding: 12px 20px 20px; flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .auto-scroll-label {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--c-text3); margin-bottom: 8px; cursor: pointer;
 }
 
 .log-body {
-  height: 220px;
+  flex: 1;
+  min-height: 120px;
   overflow-y: auto;
   padding: 12px;
   background: #0f172a;
