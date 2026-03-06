@@ -31,6 +31,7 @@ class ParkingBot:
         # State info for frontend
         self.current_trade_no = None
         self.deadline_ts = 0
+        self.last_poll_log_time = 0
 
     def log(self, msg):
         timestamp = datetime.datetime.now().strftime('%H:%M:%S')
@@ -258,8 +259,10 @@ class ParkingBot:
         
         if not valid_spaces:
             # only log occasionally to avoid spam
-            if int(time.time()) % 30 == 0:
+            current_t = time.time()
+            if current_t - self.last_poll_log_time >= 30:
                  self.log("当前没有符合条件的车位，持续轮询中...")
+                 self.last_poll_log_time = current_t
             return "CONTINUE_POLL", None
         
         target_space = valid_spaces[0]

@@ -37,7 +37,9 @@
 | 启动文件 | `main:app` |
 | 运行端口 | 8000 |
 
-若使用 gunicorn，需在「启动参数」或「配置文件」中增加：`-k uvicorn.workers.UvicornWorker -w 1`（FastAPI 为 ASGI，须用 UvicornWorker；workers 必须为 1 以共享 bot 内存）。
+若使用 gunicorn，**启动参数必须包含**：`-k uvicorn.workers.UvicornWorker -w 1`
+
+> ⚠️ **workers 必须为 1**：bot 实例在进程内存中，多 worker 无法共享。否则 `/api/status` 会交替返回不同实例，出现「未启动」与「正在寻找车位」闪烁。`/api/status` 的 `_debug` 含 `pid=xxx`，若不同请求的 pid 不同则说明是多进程。
 
 若无 gunicorn 选项，可选 **uvicorn**，启动文件填 `main:app`。
 
@@ -175,3 +177,4 @@ git push -u origin main
 | 浏览器报 Mixed Content | 后端用 HTTP，前端在 HTTPS | 后端必须上 HTTPS（Nginx SSL） |
 | 登录后刷新回到登录页 | 后端重启，session 映射丢失 | 正常现象，重新登录即可 |
 | 保存配置 422 错误 | 前端 Config 类型字段不全 | 检查前后端 ConfigModel 字段一致 |
+| **状态/日志交替闪烁** | **workers > 1，请求落到不同进程** | **gunicorn 必须 `-w 1`**；请求 `/api/status` 查看 `_debug.pid` 是否变化 |

@@ -6,6 +6,9 @@ import { ref } from 'vue'
 import * as api from '@/api'
 import type { BotStatus } from '@/types'
 
+/** 视为「正常/有效」的状态文案，失败时不应被单次异常覆盖 */
+const HEALTHY_STATUS_PATTERN = /寻找|运行|抢到|锁定|休眠|已停止|待机/
+
 export const useBotStore = defineStore('bot', () => {
   const status = ref<BotStatus>({
     is_running: false,
@@ -20,14 +23,46 @@ export const useBotStore = defineStore('bot', () => {
 
   let statusTid = 0
   let cdTid = 0
+  /** 防止 fetchStatus 并发，避免响应乱序导致状态闪烁 */
+  let statusFetching = false
+  /** 连续失败次数，多次失败才覆写为「未连接」避免单次抖动闪烁 */
+  let statusFailCount = 0
 
+  /**
+   * 拉取状态；串行执行防乱序，失败有宽限，可疑回退需二次确认
+   */
   async function fetchStatus(): Promise<void> {
+    if (statusFetching) return
+    statusFetching = true
     try {
-      status.value = await api.getStatus()
+      const next = await api.getStatus()
+      statusFailCount = 0
       connected.value = true
+      const prev = status.value
+      // 可疑回退：新值「未启动」但当前显示运行中 → 可能是错误实例/乱序，再拉一次确认
+      if (
+        !next.is_running &&
+        (next.status === '未启动' || !next.status?.trim()) &&
+        prev.is_running &&
+        HEALTHY_STATUS_PATTERN.test(prev.status || '')
+      ) {
+        const confirm = await api.getStatus()
+        if (confirm.is_running || HEALTHY_STATUS_PATTERN.test(confirm.status || '')) {
+          status.value = confirm
+          return
+        }
+      }
+      status.value = next
     } catch {
-      status.value = { ...status.value, status: '未连接' }
+      statusFailCount++
       connected.value = false
+      const prev = status.value
+      const hasHealthyStatus = HEALTHY_STATUS_PATTERN.test(prev.status || '')
+      if (!hasHealthyStatus || statusFailCount >= 2) {
+        status.value = { ...prev, status: '未连接' }
+      }
+    } finally {
+      statusFetching = false
     }
   }
 
@@ -101,6 +136,7 @@ export const useBotStore = defineStore('bot', () => {
     window.clearInterval(cdTid)
     document.removeEventListener('visibilitychange', _onVisibilityChange)
     statusTid = 0
+    statusFailCount = 0
   }
 
   return {

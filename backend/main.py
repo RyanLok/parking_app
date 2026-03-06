@@ -98,6 +98,14 @@ def _save_sessions() -> None:
 # 启动时恢复
 _load_sessions()
 
+# 启动时提醒：多 worker 会导致同一用户请求落到不同进程，返回不同 bot，状态交替错乱
+_WORKERS = int(os.environ.get("WORKERS", "1"))
+if _WORKERS > 1:
+    logger.warning(
+        "⚠️ WORKERS=%d > 1：bot 在进程内存中，多 worker 无法共享，会导致 /status 等接口交替返回错误实例！必须设为 1",
+        _WORKERS,
+    )
+
 
 def _config_path(mobile_key: str) -> Path:
     """用户配置文件路径"""
@@ -483,12 +491,13 @@ def auth_logout(
 @app.get("/api/status")
 def get_status(bot: ParkingBot = Depends(get_bot)):
     """获取运行状态"""
+    debug = getattr(bot, '_debug_match', 'unknown')
     return {
         "is_running": bot.is_running,
         "status": bot.status,
         "current_trade_no": bot.current_trade_no,
         "deadline_ts": bot.deadline_ts,
-        "_debug": getattr(bot, '_debug_match', 'unknown'),
+        "_debug": f"{debug},pid={os.getpid()}",
     }
 
 

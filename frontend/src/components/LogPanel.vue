@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onMounted, onActivated } from 'vue'
 
 const props = defineProps<{ logs: string[] }>()
 
@@ -7,11 +7,15 @@ const expanded = ref(true)
 const autoScroll = ref(true)
 const containerRef = ref<HTMLElement | null>(null)
 
-watch(() => props.logs.length, async () => {
+const scrollToBottom = async () => {
   if (!autoScroll.value || !containerRef.value) return
   await nextTick()
   containerRef.value.scrollTop = containerRef.value.scrollHeight
-})
+}
+
+watch(() => props.logs.length, scrollToBottom)
+onMounted(scrollToBottom)
+onActivated(scrollToBottom)
 
 function lineClass(line: string): string {
   if (/✅|成功|\[\+]/.test(line)) return 'l-ok'
