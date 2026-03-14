@@ -191,10 +191,6 @@ async function handleSave(): Promise<void> {
         <label class="label">期望离开时间（过滤早于此释放的车位）</label>
         <input class="input" type="time" :value="c?.expect_leave_time ?? '19:00'" @input="updateField('expect_leave_time', ($event.target as HTMLInputElement).value)" />
       </div>
-      <div class="field" style="margin-top: 12px;">
-        <label class="label">保护提前量（秒） — 到期前 N 秒主动取消并重续</label>
-        <input class="input" type="number" min="0" :value="c?.safe_cancel_advance ?? 10" @input="updateField('safe_cancel_advance', Number(($event.target as HTMLInputElement).value))" />
-      </div>
     </section>
 
     <!-- ============ 保存 ============ -->

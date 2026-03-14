@@ -42,11 +42,18 @@ export interface Plate {
   id?: number
 }
 
+/** 锁定车位的车位信息 */
+export interface CurrentSpaceInfo {
+  park_name: string
+  space_code: string
+}
+
 /** Bot 状态 */
 export interface BotStatus {
   is_running: boolean
   status: string
   current_trade_no: string | null
   deadline_ts: number
+  current_space_info?: CurrentSpaceInfo | null
   token_expired?: boolean
 }

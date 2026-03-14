@@ -332,7 +332,7 @@ class ConfigModel(BaseModel):
     start_time: str
     end_time: str
     poll_interval: int = 5
-    safe_cancel_advance: int = 10
+    safe_cancel_advance: int = 30  # 固定值，前端不展示
     city_name: Optional[str] = None
     park_name: Optional[str] = None
     plate_no: Optional[str] = None
@@ -508,18 +508,26 @@ def get_status(bot: ParkingBot = Depends(get_bot)):
                     token_expired = True
             share_order = (info_res.get("result") or {}).get("shareOrder")
             if share_order and share_order.get("tradeNo"):
-                trade_no = share_order["tradeNo"]
                 enter_deadline_ms = share_order.get("enterDeadline")
-                if enter_deadline_ms:
+                # 只有截止时间大于当前时间才算有效订单，否则视为已过期/无订单
+                if enter_deadline_ms and enter_deadline_ms / 1000.0 > time.time():
+                    trade_no = share_order["tradeNo"]
                     deadline = enter_deadline_ms / 1000.0
+                    space_info = share_order.get("spaceInfo", {})
+                    park_name = share_order.get("parkName", "") or space_info.get("parkName", "")
+                    space_code = space_info.get("spaceCode", "未知")
+                    bot.current_space_info = {"park_name": park_name, "space_code": space_code}
         except Exception:
             pass
+
+    space_info = bot.current_space_info if trade_no else None
 
     return {
         "is_running": bot.is_running,
         "status": bot.status,
         "current_trade_no": trade_no,
         "deadline_ts": deadline,
+        "current_space_info": space_info,
         "token_expired": token_expired,
         "_debug": f"{debug},pid={os.getpid()}",
     }
@@ -662,7 +670,9 @@ def cancel_current_order(bot: ParkingBot = Depends(get_bot)):
                     info_res = get_user_info(bot.token, bot.config.get("lng", ""), bot.config.get("lat", ""))
             share_order = (info_res.get("result") or {}).get("shareOrder")
             if share_order and share_order.get("tradeNo"):
-                trade_no = share_order["tradeNo"]
+                enter_deadline_ms = share_order.get("enterDeadline")
+                if enter_deadline_ms and enter_deadline_ms / 1000.0 > time.time():
+                    trade_no = share_order["tradeNo"]
         except Exception:
             pass
 
@@ -678,6 +688,7 @@ def cancel_current_order(bot: ParkingBot = Depends(get_bot)):
         bot.log("[+] 手动取消订单成功，车位已释放！")
         bot.current_trade_no = None
         bot.deadline_ts = 0
+        bot.current_space_info = None
         bot.status = "正在寻找车位" if bot.is_running else "未启动"
         return {"message": "订单已取消，车位已释放"}
     else:

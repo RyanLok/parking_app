@@ -172,9 +172,12 @@ onUnmounted(() => {
         <span class="badge" :class="statusClass">{{ bot.status.token_expired ? '登录已过期' : (bot.status.status || '未启动') }}</span>
       </div>
 
-      <!-- 已抢到车位：显示订单信息和取消按钮 -->
+      <!-- 已抢到车位：显示订单信息、车位信息和取消按钮 -->
       <div v-if="bot.status.current_trade_no" class="booked-block">
         <div class="booked-label">🚗 已锁定车位</div>
+        <div v-if="bot.status.current_space_info?.park_name || bot.status.current_space_info?.space_code" class="booked-space">
+          {{ [bot.status.current_space_info?.park_name, bot.status.current_space_info?.space_code].filter(Boolean).join(' ') }}
+        </div>
         <div class="booked-order">订单号 #{{ bot.status.current_trade_no }}</div>
         <div v-if="bot.countdown" class="booked-countdown">{{ bot.countdown }}</div>
         <button
@@ -250,6 +253,7 @@ onUnmounted(() => {
   border-radius: var(--r-sm);
 }
 .booked-label { font-size: 14px; font-weight: 600; color: #1d4ed8; }
+.booked-space { font-size: 14px; font-weight: 500; color: var(--c-text); margin-top: 6px; }
 .booked-order { font-size: 12px; color: var(--c-text2); margin-top: 4px; }
 .booked-countdown {
   font-size: 28px; font-weight: 700;

@@ -224,6 +224,64 @@ def get_space_list(token, park_id, city_id, user_lng, user_lat, leave_time_str=N
         
     return res_json, []
 
+
+def book_order_direct(token, park_id, plate_id, user_lng, user_lat, end_time_str):
+    """
+    直接下单抢位（无需先查列表，更快）
+    接口：/app/v3/order/book
+    :param end_time_str: 期望离开时间，如 '19:00' 或 '19:00:00'，会拼成 YYYY-MM-DD HH:MM:SS
+    """
+    url = "https://pm.airparking.cn/app/v3/order/book"
+
+    # 将 expect_leave_time 转为完整日期时间
+    now = datetime.datetime.now()
+    time_part = end_time_str.strip()
+    if len(time_part) == 5:  # "19:00"
+        time_part = time_part + ":00"
+    try:
+        t = datetime.datetime.strptime(time_part, "%H:%M:%S").time()
+    except ValueError:
+        t = datetime.datetime.strptime("19:00:00", "%H:%M:%S").time()
+    target_dt = datetime.datetime.combine(now.date(), t)
+    if target_dt <= now:
+        target_dt += datetime.timedelta(days=1)
+    end_time = target_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    headers = {
+        "version-tag": "release",
+        "username": token,
+        "Host": "pm.airparking.cn",
+        "User-Agent": "okhttp/3.11.0",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+
+    params = BASE_PARAMS.copy()
+    params.update({
+        "parkId": str(park_id),
+        "plateId": str(plate_id),
+        "endTime": end_time,
+        "timestamp": generate_timestamp(),
+        "token": token,
+        "userLat": str(user_lat),
+        "userLng": str(user_lng),
+    })
+    params["sign"] = generate_sign(params)
+
+    print(f"[*] 直接下单抢位 parkId={park_id} plateId={plate_id} endTime={end_time}")
+    response = requests.post(url, headers=headers, data=params, timeout=10)
+    res_json = response.json()
+
+    if res_json.get("code") == 200:
+        order = res_json.get("result", {})
+        print("[+] ✨ 直接下单成功！tradeNo:", order.get("tradeNo"))
+    elif res_json.get("code") == 4014:
+        print("[-] Token 登录过期！")
+    else:
+        print(f"[-] 直接下单失败: {res_json.get('desc', response.text)}")
+
+    return res_json
+
+
 def book_space(token, park_id, space_id, plate_id, user_lng, user_lat):
     """
     锁定下单车位

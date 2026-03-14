@@ -1,7 +1,7 @@
 import datetime
 import time
 import threading
-from api_simulator import do_login, get_space_list, book_space, get_order, cancel_order, get_user_info
+from api_simulator import do_login, book_order_direct, get_order, cancel_order, get_user_info
 
 class ParkingBot:
     def __init__(self):
@@ -21,7 +21,7 @@ class ParkingBot:
             "start_time": "08:00:00",
             "end_time": "10:30:00",
             "poll_interval": 5,
-            "safe_cancel_advance": 10
+            "safe_cancel_advance": 30  # 固定：到期前 30 秒主动取消并重续
         }
         self.token = None
         self._on_token_change = None  # 回调：token 变更时通知外部持久化
@@ -31,6 +31,7 @@ class ParkingBot:
         # State info for frontend
         self.current_trade_no = None
         self.deadline_ts = 0
+        self.current_space_info = None  # {"park_name": "", "space_code": ""} 锁定车位时展示
         self.last_poll_log_time = 0
 
     def log(self, msg):
@@ -72,7 +73,7 @@ class ParkingBot:
 
     def update_config(self, new_config):
         # 确保数值类型字段不会被存为字符串
-        for k in ('park_id', 'city_id', 'plate_id', 'poll_interval', 'safe_cancel_advance'):
+        for k in ('park_id', 'city_id', 'plate_id', 'poll_interval'):
             if k in new_config and new_config[k] is not None:
                 try:
                     new_config[k] = int(new_config[k])
@@ -111,6 +112,7 @@ class ParkingBot:
                 self.log(f"   车位: {park_name} {space_code}")
                 self.status = "已抢到车位"
                 self.current_trade_no = trade_no
+                self.current_space_info = {"park_name": park_name, "space_code": space_code}
 
                 if enter_deadline_ms:
                     deadline_dt = datetime.datetime.fromtimestamp(enter_deadline_ms / 1000.0)
@@ -123,7 +125,7 @@ class ParkingBot:
 
                     self.log(f"   最晚入场期限: {deadline_dt.strftime('%H:%M:%S')}")
 
-                    safe_keep_seconds = sleep_seconds - self.config["safe_cancel_advance"]
+                    safe_keep_seconds = sleep_seconds - 30  # 固定：到期前 30 秒取消并重续
                     if safe_keep_seconds < 0:
                         safe_keep_seconds = 1
 
@@ -143,6 +145,7 @@ class ParkingBot:
                             if not still_active:
                                 self.log("🔔 检测到订单已在外部被取消，立即恢复抢位...")
                                 self.current_trade_no = None
+                                self.current_space_info = None
                                 break
                         time.sleep(1)
 
@@ -170,6 +173,7 @@ class ParkingBot:
 
                 self.current_trade_no = None
                 self.deadline_ts = 0
+                self.current_space_info = None
                 continue  # 订单管理完毕，回到循环顶部重新检测
 
             # ====== 2. 时间控制：不在工作时段则休眠 ======
@@ -273,7 +277,14 @@ class ParkingBot:
                     self.log(f"[-] 查询订单详情异常: {e}")
                     order_res = {}
                 
-                enter_deadline_ms = order_res.get("result", {}).get("enterDeadline")
+                result = order_res.get("result", {})
+                space_info = result.get("spaceInfo", {})
+                park_name = result.get("parkName", "") or space_info.get("parkName", "")
+                space_code = space_info.get("spaceCode", "未知")
+                self.current_space_info = {"park_name": park_name, "space_code": space_code}
+                self.log(f"   车位: {park_name} {space_code}")
+                
+                enter_deadline_ms = result.get("enterDeadline")
                 
                 if enter_deadline_ms:
                     deadline_dt = datetime.datetime.fromtimestamp(enter_deadline_ms / 1000.0)
@@ -286,7 +297,7 @@ class ParkingBot:
                         
                     self.log(f"订单最晚入场期限为: {deadline_dt.strftime('%H:%M:%S')}")
                     
-                    safe_keep_seconds = sleep_seconds - self.config["safe_cancel_advance"]
+                    safe_keep_seconds = sleep_seconds - 30  # 固定：到期前 30 秒取消并重续
                     if safe_keep_seconds < 0:
                         safe_keep_seconds = 1
                         
@@ -306,6 +317,7 @@ class ParkingBot:
                             if not still_active:
                                 self.log("🔔 检测到订单已在外部被取消，立即恢复抢位...")
                                 self.current_trade_no = None
+                                self.current_space_info = None
                                 break
                         time.sleep(1)
                     
@@ -334,6 +346,7 @@ class ParkingBot:
                         
                 self.current_trade_no = None
                 self.deadline_ts = 0
+                self.current_space_info = None
                 
             elif status_code == "CONTINUE_POLL":
                 # Check is_running during brief sleep
@@ -345,6 +358,7 @@ class ParkingBot:
         self.status = "未启动"
         self.current_trade_no = None
         self.deadline_ts = 0
+        self.current_space_info = None
         self.log("⏹️ 后台机器人循环彻底退出。")
 
 
@@ -360,46 +374,36 @@ class ParkingBot:
             return None  # token 过期，交给后续登录逻辑处理
         share_order = (res.get("result") or {}).get("shareOrder")
         if share_order and share_order.get("tradeNo"):
-            return share_order
+            enter_deadline_ms = share_order.get("enterDeadline")
+            # 只有截止时间大于当前时间才算有效订单，否则视为已过期
+            if enter_deadline_ms and enter_deadline_ms / 1000.0 > time.time():
+                return share_order
         return None
 
     def _attempt_book_cycle(self):
         if not self.token:
             return "NEED_LOGIN", None
-            
-        space_res, valid_spaces = get_space_list(
-            self.token, 
-            self.config["park_id"], 
-            self.config["city_id"], 
-            self.config["lng"], 
-            self.config["lat"], 
-            leave_time_str=self.config["expect_leave_time"]
+
+        # 直接下单接口，无需先查列表，更快
+        book_res = book_order_direct(
+            self.token,
+            self.config["park_id"],
+            self.config["plate_id"],
+            self.config["lng"],
+            self.config["lat"],
+            self.config.get("expect_leave_time", "19:00"),
         )
-        
-        if space_res.get("code") == 4014:
-            return "NEED_LOGIN", None
-        
-        if not valid_spaces:
-            # only log occasionally to avoid spam
-            current_t = time.time()
-            if current_t - self.last_poll_log_time >= self.config.get("poll_interval", 10):
-                 self.log("当前没有符合条件的车位，持续轮询中...")
-                 self.last_poll_log_time = current_t
-            return "CONTINUE_POLL", None
-        
-        target_space = valid_spaces[0]
-        target_space_id = target_space.get("id")
-        space_name = target_space.get("spaceName")
-        self.log(f"⭐ 发现空位: {space_name} (ID: {target_space_id})! 发起预定...")
-        
-        book_res = book_space(self.token, self.config["park_id"], target_space_id, self.config["plate_id"], self.config["lng"], self.config["lat"])
-        
+
         if book_res.get("code") == 4014:
             return "NEED_LOGIN", None
-        elif book_res.get("code") == 200:
-            self.log("✅ 成功抢到车位并下达订单！")
+        if book_res.get("code") == 200:
             trade_no = book_res.get("result", {}).get("tradeNo")
-            return "SUCCESS_BOOKED", trade_no
-        else:
-            self.log(f"被截胡或下单失败: {book_res.get('desc')}")
-            return "CONTINUE_POLL", None
+            if trade_no:
+                self.log("✅ 成功抢到车位并下达订单！")
+                return "SUCCESS_BOOKED", trade_no
+
+        current_t = time.time()
+        if current_t - self.last_poll_log_time >= self.config.get("poll_interval", 10):
+            self.log("当前没有符合条件的车位，持续轮询中...")
+            self.last_poll_log_time = current_t
+        return "CONTINUE_POLL", None
